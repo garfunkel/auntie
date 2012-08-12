@@ -823,10 +823,6 @@ void *fuse_iview_init(struct fuse_conn_info *conn)
 {
 	struct Cache *cache = IVIEW_DATA;
 
-	srand(time(NULL));
-
-	cache->rootDir = fuse_iview_generate_root_dir();
-
 	return cache;
 }
 
@@ -834,12 +830,10 @@ int fuse_iview_getattr(const char *path, struct stat *attrStat)
 {
 	syslog(LOG_INFO, "getattr: %s", path);
 
-	char *fullPath = strjoin(((struct Cache *)IVIEW_DATA)->rootDir, path);
 	char *programName = fuse_get_iview_program_name_from_path(path);
 	char *seriesName = fuse_get_iview_series_name_from_path(path);
 	int status = 0;
 	struct Cache *cache = IVIEW_DATA;
-
 
 	if (programName)
 	{
@@ -916,7 +910,7 @@ int fuse_iview_getattr(const char *path, struct stat *attrStat)
 
 	else
 	{
-		status = lstat(fullPath, attrStat);
+		status = lstat(path, attrStat);
 		syslog(LOG_INFO, "getattr status %i %s", status, strerror(status));
 
 		if (status)
@@ -1043,8 +1037,7 @@ int fuse_iview_rmdir(const char *path)
 {
 	syslog(LOG_INFO, "rmdir %s", path);
 
-	char *fullPath = strjoin(((struct Cache *)IVIEW_DATA)->rootDir, path);
-	int status = rmdir(fullPath);
+	int status = rmdir(path);
 
 	if (status)
 		return -errno;
@@ -1077,9 +1070,7 @@ int fuse_iview_chmod(const char *path, mode_t mode)
 {
 	syslog(LOG_INFO, "chmod %s", path);
 
-	char *fullPath = strjoin(((struct Cache *)IVIEW_DATA)->rootDir, path);
-
-	int status = chmod(fullPath, mode);
+	int status = chmod(path, mode);
 
 	if (status)
 		return -errno;
@@ -1091,9 +1082,7 @@ int fuse_iview_chown(const char *path, uid_t uid, gid_t gid)
 {
 	syslog(LOG_INFO, "chown: %s", path);
 
-	char *fullPath = strjoin(((struct Cache *)IVIEW_DATA)->rootDir, path);
-
-	int status = chown(fullPath, uid, gid);
+	int status = chown(path, uid, gid);
 
 	if (status)
 		return -errno;
@@ -1112,8 +1101,7 @@ int fuse_iview_truncate(const char *path, off_t offset)
 {
 	syslog(LOG_INFO, "truncate %s", path);
 	
-	char *fullPath = strjoin(((struct Cache *)IVIEW_DATA)->rootDir, path);
-	int status = truncate(fullPath, offset);
+	int status = truncate(path, offset);
 
 	if (status)
 		return -errno;
@@ -1132,11 +1120,9 @@ int fuse_iview_mkdir(const char *path, mode_t mode)
 {
 	syslog(LOG_INFO, "mkdir: %s", path);
 
-	char *fullPath = strjoin(((struct Cache *)IVIEW_DATA)->rootDir, path);
+	int status = mkdir(path, mode);
 
-	int status = mkdir(fullPath, mode);
-
-	syslog(LOG_INFO, "mkdir fullpath: %s", fullPath);
+	syslog(LOG_INFO, "mkdir fullpath: %s", path);
 
 	syslog(LOG_INFO, "mkdir: status %i %s", status, strerror(errno));
 
@@ -1221,16 +1207,9 @@ void fuse_iview_destroy(void *privateData)
 {
 	struct Cache *cache = (struct Cache *)privateData;
 
-	nftw(((struct Cache *)IVIEW_DATA)->rootDir, ftw_remove, 64, FTW_DEPTH | FTW_PHYS);
-
 	free(cache);
 
 	cache = NULL;
-}
-
-int ftw_remove(const char *path, const struct stat *pathStat, int flags, struct FTW *buffer)
-{
-	return remove(path);
 }
 
 void handle_sigint(int sig)
@@ -1272,37 +1251,6 @@ struct Cache *iview_cache_new()
 	memset(cache, 0, sizeof(struct Cache));
 
 	return cache;
-}
-
-char *fuse_iview_generate_root_dir()
-{
-	int status = mkdir(FUSE_IVIEW_ROOT_PREFIX, FUSE_ROOT_DIR_MODE);
-
-	if (!status)
-		return (char *)FUSE_IVIEW_ROOT_PREFIX;
-
-	char *path = malloc(strlen(FUSE_IVIEW_ROOT_PREFIX) + sizeof(int) + 2);
-
-	strcpy(path, FUSE_IVIEW_ROOT_PREFIX);
-	strcat(path, "_");
-
-	path[strlen(path)] = '\0';
-
-	// TODO: Check for permissions error or we will spin around forever
-	while (status)
-	{
-		if (errno != EEXIST)
-			path = NULL;
-
-			break;
-
-		for (unsigned int i = strlen(FUSE_IVIEW_ROOT_PREFIX) + 1; i < strlen(FUSE_IVIEW_ROOT_PREFIX) + sizeof(int) + 1; i++)
-			path[i] = rand() % 26 + 65;
-
-		status = mkdir(path, FUSE_ROOT_DIR_MODE);
-	}
-
-	return path;
 }
 
 char *fuse_get_iview_program_name_from_path(const char *path)

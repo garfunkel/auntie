@@ -16,7 +16,6 @@
 #include <signal.h>
 #include <syslog.h>
 #include <dirent.h>
-#include <ftw.h>
 
 #include <librtmp/rtmp.h>
 #include <jansson.h>
@@ -155,7 +154,6 @@ struct Cache
 	struct IviewSeries *index;
 	struct IviewCategories *categories;
 	struct tm *lastRefresh;
-	char *rootDir;
 };
 
 void *fuse_iview_init(struct fuse_conn_info *conn);
@@ -226,7 +224,6 @@ char *strjoin(const char *first, const char *second);
 char *strcreplace(const char *str, const char from, const char to);
 bool iview_cache_index_needs_refresh(const struct Cache *cache);
 void iview_cache_index_refresh(struct Cache *cache);
-int ftw_remove(const char *path, const struct stat *pathStat, int flags, struct FTW *buffer);
 char *fuse_get_iview_series_name_from_path(const char *path);
 char *fuse_get_iview_program_name_from_path(const char *path);
 
