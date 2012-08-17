@@ -1,5 +1,31 @@
 #include "auntie.h"
 
+const unsigned short IVIEW_PORT = 80;
+const char *ABC_MAIN_URL = "www.abc.net.au";
+const char *IVIEW_CONFIG_URL = "/iview/xml/config.xml";
+const char *HTTP_HEADER_TRANSFER_ENCODING_CHUNKED = "chunked";
+const char *IVIEW_CONFIG_API_SERIES_INDEX = "seriesIndex";
+const char *IVIEW_CONFIG_API_SERIES = "series=";
+const char *IVIEW_CONFIG_TIME_FORMAT = "%d/%m/%Y %H:%M:%S";
+const char *IVIEW_CATEGORIES_URL = "xml/categories.xml";
+const size_t IVIEW_SERIES_ID_LENGTH = 11;
+const size_t IVIEW_PROGRAM_ID_LENGTH = 11;
+const ssize_t IVIEW_RTMP_BUFFER_SIZE = 8192;
+const int IVIEW_REFRESH_INTERVAL = 3600;
+const char *IVIEW_DOWNLOAD_EXT = ".mp4";
+const char *IVIEW_SWF_URL = "http://www.abc.net.au/iview/images/iview.jpg";
+const uint32_t IVIEW_SWF_SIZE = 2122;
+const uint8_t IVIEW_SWF_HASH[] = {0x96, 0xcc, 0x76, 0xf1, 0xd5, 0x38, 0x5f, 0xb5,
+								  0xcd, 0xa6, 0xe2, 0xce, 0x5c, 0x73, 0x32, 0x3a,
+								  0x39, 0x90, 0x43, 0xd0, 0xbb, 0x6c, 0x68, 0x7e,
+								  0xdd, 0x80, 0x7e, 0x5c, 0x73, 0xc4, 0x2b, 0x37};
+const uint16_t IVIEW_RTMP_PORT = 1935;
+const unsigned int BYTES_IN_MEGABYTE = 1048576;
+const char *IVIEW_RTMP_AKAMAI_PROTOCOL = "rtmp://";
+const char *IVIEW_RTMP_AKAMAI_HOST = "cp53909.edgefcs.net";
+const char *IVIEW_RTMP_AKAMAI_APP_PREFIX = "/ondemand?auth=";
+const char *IVIEW_RTMP_AKAMAI_PLAYPATH_PREFIX = "mp4:flash/playback/_definst_/";
+
 size_t count(const char *input, const char *seps)
 {
 	size_t numTokens = 0;
@@ -18,7 +44,7 @@ size_t count(const char *input, const char *seps)
 	if (numTokens > 0)
 		numTokens--;
 
-	free(inputDup);
+	free_null(inputDup);
 
 	return numTokens;
 }
@@ -34,7 +60,7 @@ unsigned int split(const char *input, const char *seps, char ***output)
 	for (unsigned int i = 1; i < numTokens; i++)
 		(*output)[i] = strdup(strtok(NULL, seps));
 
-	free(inputDup);
+	free_null(inputDup);
 
 	return numTokens;
 }
@@ -374,6 +400,16 @@ struct IviewProgram *series_parse(const char *json)
 								program->desc = (char *)json_string_value(tmp);
 
 							// TODO: Do others.
+							tmp = json_object_get(programNode, "i");
+
+							if (json_is_string(tmp))
+							{
+								char *sizeStr = (char *)json_string_value(tmp);
+
+								program->size = atoi((char *)sizeStr) * BYTES_IN_MEGABYTE + BYTES_IN_MEGABYTE;
+
+								free_null(sizeStr);
+							}
 
 							tmp = json_object_get(programNode, "n");
 
@@ -681,8 +717,10 @@ struct IviewSeries *get_series(const struct Cache *cache)
 	return NULL;
 }
 
-struct IviewProgram *get_programs(const struct Cache *cache, const struct IviewSeries *series)
+void get_programs(const struct Cache *cache, struct IviewSeries *series)
 {
+	iview_cache_program_free(series->program);
+
 	struct HttpRequest request;
 	char seriesIdStr[IVIEW_SERIES_ID_LENGTH];
 
@@ -702,7 +740,7 @@ struct IviewProgram *get_programs(const struct Cache *cache, const struct IviewS
 
 	char *page = fetch_uri(request);
 
-	return series_parse(page);
+	series->program = series_parse(page);
 }
 
 struct IviewProgram *select_program(const struct IviewSeries *series)
@@ -741,64 +779,126 @@ struct IviewProgram *select_program(const struct IviewSeries *series)
 	return NULL;
 }
 
-void download_program(struct Cache *cache, const struct IviewProgram *program)
+RTMP *download_program_open(struct Cache *cache, const struct IviewProgram *program)
 {
-	int status = 0;
-
-	auth_fetch(cache);
-
-	printf("\n%s %s", cache->auth->host, program->uri);
-
 	// Create session handle and initialise.
 	RTMP *rtmp = RTMP_Alloc();
 
-	RTMP_Init(rtmp);
-	char tcUrl[256];
-	//char *swfVfy = "http://www.abc.net.au/iview/images/iview.jpg";
-
-	char *url = "rtmp://cp53909.edgefcs.net////flash/playback/_definst_/gavinandstacey_01_06.mp4";
-	strcpy(tcUrl, "rtmp://cp53909.edgefcs.net/ondemand?auth=");
-	strcat(tcUrl, cache->auth->token);
-
-	printf("\ntcUrl: %s", tcUrl);
-
-	// 2816053 531746
-
-	status = RTMP_SetupURL(rtmp, url);
-
-	rtmp->Link.tcUrl.av_val = tcUrl;
-	rtmp->Link.tcUrl.av_len = strlen(tcUrl);
-
-	printf("SetupURL: %s %i %i\n", rtmp->Link.tcUrl.av_val, rtmp->Link.tcUrl.av_len, status);
-
-	status = RTMP_Connect(rtmp, NULL);
-
-	printf("Connect: %i\n", status);
-
-	status = RTMP_ConnectStream(rtmp, 0);
-
-	printf("ConnectStream: %i\n", status);
-
-	char *buffer = malloc(IVIEW_RTMP_BUFFER_SIZE);
-	int total = 0;
-
-	FILE *file = fopen("output", "w");
-
-	while (total < IVIEW_RTMP_BUFFER_SIZE)
+	if (!rtmp)
 	{
-		int num = RTMP_Read(rtmp, buffer, IVIEW_RTMP_BUFFER_SIZE);
-		total += num;
+		#ifdef DEBUG
+		syslog(LOG_ERR, "Could not allocate RTMP structure.");
+		#endif // DEBUG
 
-		printf("Read: %i", num);
-
-		fwrite(buffer, num, 1, file);
+		return 0;
 	}
 
-	free(buffer);
+	auth_fetch(cache);
 
-	buffer = NULL;
+	char targetUrl[strlen(IVIEW_RTMP_AKAMAI_PROTOCOL)
+		+ strlen(IVIEW_RTMP_AKAMAI_HOST)
+		+ strlen(IVIEW_RTMP_AKAMAI_APP_PREFIX)
+		+ strlen(cache->auth->token) + 1];
+	strcpy(targetUrl, IVIEW_RTMP_AKAMAI_PROTOCOL);
+	strcat(targetUrl, IVIEW_RTMP_AKAMAI_HOST);
+	strcat(targetUrl, IVIEW_RTMP_AKAMAI_APP_PREFIX);
+	strcat(targetUrl, cache->auth->token);
 
-	fclose(file);
+	char appUrl[strlen(IVIEW_RTMP_AKAMAI_APP_PREFIX)
+		+ strlen(cache->auth->token) + 1];
+	strcpy(appUrl, IVIEW_RTMP_AKAMAI_APP_PREFIX);
+	strcat(appUrl, cache->auth->token);
+
+	char playpathUrl[strlen(IVIEW_RTMP_AKAMAI_PLAYPATH_PREFIX)
+		+ strlen(program->uri) + 1];
+	strcpy(playpathUrl, IVIEW_RTMP_AKAMAI_PLAYPATH_PREFIX);
+	strcat(playpathUrl, program->uri);
+
+	AVal host = {(char *)IVIEW_RTMP_AKAMAI_HOST, strlen((char *)IVIEW_RTMP_AKAMAI_HOST)};
+	AVal flashVer = {RTMP_DefaultFlashVer.av_val, RTMP_DefaultFlashVer.av_len};
+	AVal sockshost = {NULL, 0};
+	AVal playpath = {playpathUrl, strlen(playpathUrl)};
+	AVal tcUrl = {targetUrl, strlen(targetUrl)};
+	AVal swf = {(char *)IVIEW_SWF_URL, strlen((char *)IVIEW_SWF_URL)};
+	AVal page = {NULL, 0};
+	AVal app = {appUrl, strlen(appUrl)};
+	AVal auth = {cache->auth->token, strlen(cache->auth->token)};
+	AVal hash = {(char *)IVIEW_SWF_HASH, RTMP_SWF_HASHLEN};
+	AVal sub = {NULL, 0};
+
+	RTMP_Init(rtmp);
+	RTMP_SetupStream(rtmp, RTMP_PROTOCOL_RTMP,
+		&host, IVIEW_RTMP_PORT, &sockshost, &playpath, &tcUrl, &swf,
+		&page, &app, &auth, &hash, IVIEW_SWF_SIZE, &flashVer, &sub, 0, 0, FALSE, 30);
+
+	printf("\nProtocol: %s", RTMPProtocolStringsLower[rtmp->Link.protocol&7]);
+	printf("\nHost: %s", rtmp->Link.hostname.av_val);
+	printf("\nPort: %i", rtmp->Link.port);
+	printf("\nSockshost: %s", rtmp->Link.sockshost.av_val);
+	printf("\nPlaypath: %s", rtmp->Link.playpath.av_val);
+	printf("\nTcUrl: %s", rtmp->Link.tcUrl.av_val);
+	printf("\nSwfUrl: %s", rtmp->Link.swfUrl.av_val);
+	printf("\nPageUrl: %s", rtmp->Link.pageUrl.av_val);
+	printf("\nApp: %s", rtmp->Link.app.av_val);
+	printf("\nAuth: %s", rtmp->Link.auth.av_val);
+	printf("\nApp: %s %i", app.av_val, app.av_len);
+	printf("\nHash: %s %i", hash.av_val, hash.av_len);
+
+	if (!RTMP_Connect(rtmp, NULL))
+	{
+		#ifdef DEBUG
+		syslog(LOG_ERR, "Could not connect to RTMP server.");
+		#endif // DEBUG
+
+		return 0;
+	}
+
+	if (!RTMP_ConnectStream(rtmp, 0))
+	{
+		#ifdef DEBUG
+		syslog(LOG_ERR, "Could not connect to RTMP stream.");
+		#endif // DEBUG
+
+		return 0;
+	}
+
+	#ifdef DEBUG
+	syslog(LOG_INFO, "RTMP Stream started...");
+	#endif // DEBUG
+
+	return rtmp;
+}
+
+int download_program_read(RTMP *rtmp, char *buffer, size_t size, off_t offset)
+{
+	int total = 0, num = 0;
+
+	do
+	{
+		syslog(LOG_INFO, "BEFORE: Total: %i Size: %i Offset %i", total, size, offset);
+		num = RTMP_Read(rtmp, buffer + total, size - total);
+		
+		if (num > 0)
+			total += num;
+
+		syslog(LOG_INFO, "AFTER: Total: %i Num: %i Size: %i Offset %i", total, num, size, offset);
+		syslog(LOG_INFO, "%i %i %i", !RTMP_ctrlC, RTMP_IsConnected(rtmp), !RTMP_IsTimedout(rtmp));
+	} while (num > -1 && total < size && !RTMP_ctrlC && RTMP_IsConnected(rtmp) && !RTMP_IsTimedout(rtmp));
+
+	syslog(LOG_INFO, "END LOOP: %i %i %i", !RTMP_ctrlC, RTMP_IsConnected(rtmp), !RTMP_IsTimedout(rtmp));
+
+	return total;
+}
+
+int download_program_close(RTMP *rtmp)
+{
+	#ifdef DEBUG
+	syslog(LOG_INFO, "Stream finished, freeing RTMP structure...");
+	#endif // DEBUG
+
+	RTMP_Free(rtmp);
+
+	return 0;
 }
 
 bool iview_cache_index_needs_refresh(const struct Cache *cache)
@@ -809,7 +909,7 @@ bool iview_cache_index_needs_refresh(const struct Cache *cache)
 	time_t refreshTs = mktime(cache->lastRefresh);
 	time_t currentTs = time(NULL);
 
-	return (currentTs - refreshTs) > FUSE_IVIEW_REFRESH_INTERVAL;
+	return (currentTs - refreshTs) > IVIEW_REFRESH_INTERVAL;
 }
 
 void iview_cache_index_refresh(struct Cache *cache)
@@ -819,397 +919,103 @@ void iview_cache_index_refresh(struct Cache *cache)
 	time_fetch(cache);
 }
 
-void *fuse_iview_init(struct fuse_conn_info *conn)
+void iview_cache_config_free(struct IviewConfig *config)
 {
-	struct Cache *cache = IVIEW_DATA;
+	if (!config)
+		return;
 
-	return cache;
+	free_null(config->api);
+	free_null(config->auth);
+	free_null(config->tray);
+	free_null(config->categories);
+	free_null(config->classifications);
+	free_null(config->captions);
+	free_null(config->serverStreaming);
+	free_null(config->serverFallback);
+	free_null(config->highlights);
+	free_null(config->home);
+	free_null(config->geo);
+	free_null(config->time);
+	free_null(config->feedbackUrl);
 }
 
-int fuse_iview_getattr(const char *path, struct stat *attrStat)
+void iview_cache_auth_free(struct IviewAuth *auth)
 {
-	syslog(LOG_INFO, "getattr: %s", path);
+	if (!auth)
+		return;
 
-	char *programName = fuse_get_iview_program_name_from_path(path);
-	char *seriesName = fuse_get_iview_series_name_from_path(path);
-	int status = 0;
-	struct Cache *cache = IVIEW_DATA;
+	free(auth->ip);
+	free(auth->isp);
+	free(auth->desc);
+	free(auth->host);
+	free(auth->server);
+	free(auth->bwTest);
+	free(auth->token);
+	free(auth->text);
+}
 
-	if (programName)
+void iview_cache_index_free(struct IviewSeries *series)
+{
+	if (!series)
+		return;
+
+	struct IviewSeries *nextSeries = series->next;
+
+	while (series)
 	{
-		struct IviewSeries *series = cache->index;
+		iview_cache_program_free(series->program);
 
-		while (series)
-		{
-			if (!strcmp(series->name, seriesName))
-			{
-				struct IviewProgram *program = series->program;
+		free_null(series->name);
+		free_null(series->desc);
+		free_null(series->image);
+		free(series);
 
-				while (program)
-				{
-					if (!strcmp(program->name, programName))
-					{
-						attrStat->st_mode = S_IFDIR | 0754;
-						attrStat->st_nlink = 3;
-						attrStat->st_uid = getuid();
-						attrStat->st_gid = getgid();
-						attrStat->st_size = FUSE_IVIEW_BLOCK_SIZE;
-						attrStat->st_blksize = FUSE_IVIEW_BLOCK_SIZE;
-						attrStat->st_blocks = FUSE_IVIEW_BLOCK_COUNT;
-						attrStat->st_atime = time(NULL);
-						attrStat->st_mtime = mktime(cache->lastRefresh);
-
-						break;
-					}
-
-					program = program->next;
-
-					if (!program)
-					{
-						status = -ENOENT;
-
-						break;
-					}
-				}
-			}
-
-			series = series->next;
-
-			if (!series)
-				status = -ENOENT;
-		}
+		series = nextSeries;
+		nextSeries = series->next;
 	}
+}
 
-	else if (seriesName)
+void iview_cache_program_free(struct IviewProgram *program)
+{
+	if (!program)
+		return;
+
+	struct IviewProgram *nextProgram = program->next;
+
+	while (program)
 	{
-		struct IviewSeries *series = cache->index;
+		free_null(program->name);
+		free_null(program->desc);
+		free_null(program->uri);
+		free_null(program->transmissionTime);
+		free_null(program->iviewExpiry);
+		free(program);
 
-		while (series)
-		{
-			if (!strcmp(series->name, seriesName))
-			{
-				attrStat->st_mode = S_IFDIR | 0754;
-				attrStat->st_nlink = 3;
-				attrStat->st_uid = getuid();
-				attrStat->st_gid = getgid();
-				attrStat->st_size = FUSE_IVIEW_BLOCK_SIZE;
-				attrStat->st_blksize = FUSE_IVIEW_BLOCK_SIZE;
-				attrStat->st_blocks = FUSE_IVIEW_BLOCK_COUNT;
-				attrStat->st_atime = time(NULL);
-				attrStat->st_mtime = mktime(cache->lastRefresh);
-
-				break;
-			}
-
-			series = series->next;
-
-			if (!series)
-				status = -ENOENT;
-		}
+		program = nextProgram;
+		nextProgram = program->next;
 	}
+}
 
-	else
+void iview_cache_keyword_free(struct IviewKeyword *keyword)
+{
+	if (!keyword)
+		return;
+
+	struct IviewKeyword *nextKeyword = keyword->next;
+
+	while (keyword)
 	{
-		status = lstat(path, attrStat);
-		syslog(LOG_INFO, "getattr status %i %s", status, strerror(status));
+		free_null(keyword->text);
+		free(keyword);
 
-		if (status)
-			return -ENOENT;
+		keyword = nextKeyword;
+		nextKeyword = keyword->next;
 	}
-
-	return status;
 }
 
-int fuse_iview_readlink(const char *path, char *buffer, size_t size)
+void iview_cache_categories_free(struct IviewCategories *categories)
 {
-	syslog(LOG_INFO, "readlink");
 
-	return 0;
-}
-
-int fuse_iview_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *info)
-{
-	syslog(LOG_INFO, "readdir %s", path);
-
-	//DIR *dir = (DIR *)info->fh;
-
-	//struct dirent *dirEnt = readdir(dir);
-
-	//if (!dirEnt)
-	//	return -errno;
-
-	struct Cache *cache = IVIEW_DATA;
-
-	if (iview_cache_index_needs_refresh(cache))
-		iview_cache_index_refresh(cache);
-
-	char *seriesName = fuse_get_iview_series_name_from_path(path);
-
-	if (!strcmp(path, FUSE_SERIES_ROOT))
-	{
-		struct IviewSeries *series = cache->index;
-
-		while (series)
-		{
-			char *seriesName = strcreplace(series->name, '/', '-');
-
-			filler(buffer, seriesName, NULL, 0);
-
-			series = series->next;
-		}
-	}
-
-	else if (seriesName)
-	{
-		struct IviewSeries *series = cache->index;
-
-		while (series)
-		{
-			if (!strcmp(series->name, seriesName))
-			{
-				if (!series->program)
-					get_programs(cache, series);
-
-				struct IviewProgram *program = series->program;
-
-				while (program)
-				{
-					filler(buffer, program->name, NULL, 0);
-
-					program = program->next;
-				}
-
-				break;
-			}
-
-			series = series->next;
-		}
-	}
-
-	filler(buffer, ".", NULL, 0);
-	filler(buffer, "..", NULL, 0);
-
-	return 0;
-}
-
-int fuse_iview_opendir(const char *path, struct fuse_file_info *info)
-{
-	syslog(LOG_INFO, "opendir %s", path);
-
-	// Directory only valid if root, or series.
-	if (strcmp(path, "/") && !fuse_get_iview_series_name_from_path(path))
-		return -ENOENT;
-
-	//char *fullPath = strjoin(((struct Cache *)IVIEW_DATA)->rootDir, path);
-	//DIR *dir = opendir(fullPath);
-	//int status = 0;
-
-	//info->fh = (intptr_t) dir;
-
-	//if (!dir)
-	//	return -errno;
-
-	return 0;
-}
-
-int fuse_iview_mknod(const char *path, mode_t mode, dev_t dev)
-{
-	syslog(LOG_INFO, "mknod");
-
-	return 0;
-}
-
-int fuse_iview_open(const char *path, struct fuse_file_info *info)
-{
-	syslog(LOG_INFO, "open");
-
-	return 0;	
-}
-
-int fuse_iview_unlink(const char *path)
-{
-	syslog(LOG_INFO, "unlink");
-
-	return 0;
-}
-
-int fuse_iview_rmdir(const char *path)
-{
-	syslog(LOG_INFO, "rmdir %s", path);
-
-	int status = rmdir(path);
-
-	if (status)
-		return -errno;
-
-	return status;
-}
-
-int fuse_iview_symlink(const char *path, const char *link)
-{
-	syslog(LOG_INFO, "symlink");
-
-	return 0;
-}
-
-int fuse_iview_rename(const char *fromPath, const char *toPath)
-{
-	syslog(LOG_INFO, "rename");
-
-	return 0;
-}
-
-int fuse_iview_link(const char *path, const char *link)
-{
-	syslog(LOG_INFO, "link");
-
-	return 0;
-}
-
-int fuse_iview_chmod(const char *path, mode_t mode)
-{
-	syslog(LOG_INFO, "chmod %s", path);
-
-	int status = chmod(path, mode);
-
-	if (status)
-		return -errno;
-
-	return status;
-}
-
-int fuse_iview_chown(const char *path, uid_t uid, gid_t gid)
-{
-	syslog(LOG_INFO, "chown: %s", path);
-
-	int status = chown(path, uid, gid);
-
-	if (status)
-		return -errno;
-
-	return status;
-}
-
-int fuse_iview_create(const char *path, mode_t mode, struct fuse_file_info *info)
-{
-	syslog(LOG_INFO, "create %s", path);
-
-	return 0;
-}
-
-int fuse_iview_truncate(const char *path, off_t offset)
-{
-	syslog(LOG_INFO, "truncate %s", path);
-	
-	int status = truncate(path, offset);
-
-	if (status)
-		return -errno;
-
-	return status;
-}
-
-int fuse_iview_utime(const char *path, struct utimbuf *buffer)
-{
-	syslog(LOG_INFO, "utime");
-
-	return 0;
-}
-
-int fuse_iview_mkdir(const char *path, mode_t mode)
-{
-	syslog(LOG_INFO, "mkdir: %s", path);
-
-	int status = mkdir(path, mode);
-
-	syslog(LOG_INFO, "mkdir fullpath: %s", path);
-
-	syslog(LOG_INFO, "mkdir: status %i %s", status, strerror(errno));
-
-	if (status)
-		return -errno;
-
-	return 0;
-}
-
-
-int fuse_iview_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *info)
-{
-	syslog(LOG_INFO, "read");
-
-	return 0;
-}
-
-int fuse_iview_write(const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *info)
-{
-	syslog(LOG_INFO, "write");
-
-	return 0;
-}
-
-int fuse_iview_statfs(const char *path, struct statvfs *stat)
-{
-	syslog(LOG_INFO, "statfs");
-
-	return 0;
-}
-
-int fuse_iview_flush(const char *path, struct fuse_file_info *info)
-{
-	syslog(LOG_INFO, "flush");
-
-	return 0;
-}
-
-int fuse_iview_release(const char *path, struct fuse_file_info *info)
-{
-	syslog(LOG_INFO, "release");
-
-	return 0;
-}
-
-int fuse_iview_fsync(const char *path, int x, struct fuse_file_info *info)
-{
-	syslog(LOG_INFO, "fsync");
-
-	return 0;
-}
-
-int fuse_iview_setxattr(const char *path, const char *attr, const char *value, size_t size, int x)
-{
-	syslog(LOG_INFO, "setxattr");
-
-	return 0;
-}
-
-int fuse_iview_getxattr(const char *path, const char *attr, char *value, size_t size)
-{
-	syslog(LOG_INFO, "getxattr");
-
-	return 0;
-}
-
-int fuse_iview_listxattr(const char *path, char *attr, size_t size)
-{
-	syslog(LOG_INFO, "listxattr");
-
-	return 0;
-}
-
-int fuse_iview_removexattr(const char *path, const char *attr)
-{
-	syslog(LOG_INFO, "removexattr");
-
-	return 0;
-}
-
-void fuse_iview_destroy(void *privateData)
-{
-	struct Cache *cache = (struct Cache *)privateData;
-
-	free(cache);
-
-	cache = NULL;
 }
 
 void handle_sigint(int sig)
@@ -1253,95 +1059,76 @@ struct Cache *iview_cache_new()
 	return cache;
 }
 
-char *fuse_get_iview_program_name_from_path(const char *path)
+unsigned char *iview_filename_encode(const unsigned char *fileName)
 {
-	if (strlen(path) <= strlen(FUSE_SERIES_ROOT))
+	if (!fileName)
 		return NULL;
 
-	char *programName = NULL;
+	ssize_t bufferSize = strlen((char *)fileName) + 1;
 
-	for (unsigned int i = strlen(FUSE_SERIES_ROOT); i < strlen(path); i++)
+	for (unsigned int i = 0; i < strlen((char *)fileName); i++)
 	{
-		if (path[i] == '/')
-		{
-			programName = (char *)(path + i + 1);
-
-			break;
-		}
+		if (fileName[i] == '/')
+			bufferSize += 2;
 	}
 
-	if (!programName)
-		return NULL;
+	unsigned char *outName = malloc(bufferSize);
+	unsigned int nextIndex = 0;
 
-	for (unsigned int i = 0; i < strlen(programName); i++)
-		if (programName[i] == '/')
-			return NULL;
-
-	return programName;
-}
-
-char *fuse_get_iview_series_name_from_path(const char *path)
-{
-	if (strlen(path) <= strlen(FUSE_SERIES_ROOT))
-		return NULL;
-
-	for (unsigned int i = strlen(FUSE_SERIES_ROOT); i < strlen(path); i++)
-		if (path[i] == '/')
-			return NULL;
-
-	return (char *)(path + strlen(FUSE_SERIES_ROOT));
-}
-
-int main(int argc, char *argv[])
-{
-	struct Cache *cache = iview_cache_new();
-
-	config_fetch(cache);
-
-	return fuse_main(argc, argv, &fuse_iview_operations, cache);
-
-	/*struct IviewSeries *series;
-
-	signal(SIGINT, handle_sigint);
-
-	openlog("auntie", 0, 0);
-
-	syslog(LOG_INFO, "Opened log.");
-
-	while (TRUE)
+	for (unsigned int i = 0; i < bufferSize; i++)
 	{
-
-	}
-
-	syslog(LOG_INFO, "Closed log.");
-
-	closelog();
-
-	return 0;
-
-	config_fetch(&cache);
-	index_fetch(&cache);
-	categories_fetch(&cache);
-
-	while (TRUE)
-	{
-		series = get_series(&cache);
-
-		if (!series)
-			break;
-
-		// Check if programs have been loaded into this series yet.
-		if (!series->program)
+		if (fileName[nextIndex] == '/')
 		{
-			series->program = get_programs(&cache, series);
-
-			struct IviewProgram *program = select_program(series);
-
-			download_program(&cache, program);
+			outName[i] = 0xE2;
+			outName[++i] = 0x88;
+			outName[++i] = 0x95;
 		}
 
-		break;
-	}*/
+		else
+			outName[i] = fileName[nextIndex];
 
-	return 0;
+		nextIndex++;
+	}
+
+	return outName;
+}
+
+unsigned char *iview_filename_decode(const unsigned char *fileName)
+{
+	if (!fileName)
+		return NULL;
+
+	ssize_t bufferSize = strlen((char *)fileName) + 1;
+
+	for (unsigned int i = 0; i < strlen((char *)fileName); i++)
+	{
+		if (fileName[i] == 0xE2 && fileName[i + 1] == 0x88 && fileName[i + 2] == 0x95)
+			bufferSize -= 2;
+	}
+
+	unsigned char *outName = malloc(bufferSize);
+	unsigned int nextIndex = 0;
+
+	for (unsigned int i = 0; i <= strlen((char *)fileName); i++)
+	{
+		if (fileName[i] == 0xE2 && fileName[i + 1] == 0x88 && fileName[i + 2] == 0x95)
+		{
+			outName[nextIndex] = '/';
+			i += 2;
+		}
+
+		else
+			outName[nextIndex] = fileName[i];
+
+		nextIndex += 1;
+	}
+
+	return outName;
+}
+
+void free_null(void *ptr)
+{
+	free(ptr);
+
+	ptr = NULL;
 }
