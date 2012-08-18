@@ -1,5 +1,7 @@
 #include "auntie.h"
 
+#include <pthread.h>
+
 const unsigned short IVIEW_PORT = 80;
 const char *ABC_MAIN_URL = "www.abc.net.au";
 const char *IVIEW_CONFIG_URL = "/iview/xml/config.xml";
@@ -875,17 +877,12 @@ int download_program_read(RTMP *rtmp, char *buffer, size_t size, off_t offset)
 
 	do
 	{
-		syslog(LOG_INFO, "BEFORE: Total: %i Size: %i Offset %i", total, size, offset);
 		num = RTMP_Read(rtmp, buffer + total, size - total);
-		
+
 		if (num > 0)
 			total += num;
 
-		syslog(LOG_INFO, "AFTER: Total: %i Num: %i Size: %i Offset %i", total, num, size, offset);
-		syslog(LOG_INFO, "%i %i %i", !RTMP_ctrlC, RTMP_IsConnected(rtmp), !RTMP_IsTimedout(rtmp));
 	} while (num > -1 && total < size && !RTMP_ctrlC && RTMP_IsConnected(rtmp) && !RTMP_IsTimedout(rtmp));
-
-	syslog(LOG_INFO, "END LOOP: %i %i %i", !RTMP_ctrlC, RTMP_IsConnected(rtmp), !RTMP_IsTimedout(rtmp));
 
 	return total;
 }

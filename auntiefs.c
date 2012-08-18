@@ -1,11 +1,14 @@
 #include "auntie.h"
 #include "auntiefs.h"
 
+#include <pthread.h>
+
 const char *FUSE_SERIES_ROOT = "/";
 const int FUSE_ROOT_DIR_MODE = 0754;
 const int FUSE_SERIES_DIR_MODE = 0754;
 const blksize_t FUSE_IVIEW_BLOCK_SIZE = 4096;
 const blkcnt_t FUSE_IVIEW_BLOCK_COUNT = 1;
+pthread_mutex_t rtmp_read_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 struct fuse_operations fuse_iview_operations =
 {
@@ -293,7 +296,13 @@ int fuse_iview_open(const char *path, struct fuse_file_info *info)
 				{
 					if (!strncmp(program->name, decodedProgramName, strlen(program->name)))
 					{
-						info->fh = (uint64_t)download_program_open(cache, program);
+						struct RtmpSession *rtmpSession = malloc(sizeof(struct RtmpSession));
+
+						pthread_mutex_init(&rtmpSession->rtmp_read_lock, NULL);
+						rtmpSession->rtmp = download_program_open(cache, program);
+						
+						info->fh = (uint64_t)rtmpSession;
+						info->nonseekable = TRUE;
 
 						found = TRUE;
 
@@ -432,11 +441,16 @@ int fuse_iview_mkdir(const char *path, mode_t mode)
 
 int fuse_iview_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *info)
 {
-	sleep(1);
-
 	syslog(LOG_INFO, "read %s %i %i", path, (unsigned int)size, (unsigned int)offset);
 
-	return download_program_read((RTMP *)info->fh, buffer, size, offset);
+
+	struct RtmpSession *rtmpSession = (struct RtmpSession *)info->fh;
+
+	pthread_mutex_lock(&rtmpSession->rtmp_read_lock);
+	int numRead = download_program_read(rtmpSession->rtmp, buffer, size, offset);
+	pthread_mutex_unlock(&rtmpSession->rtmp_read_lock);
+
+	return numRead;
 }
 
 int fuse_iview_write(const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *info)

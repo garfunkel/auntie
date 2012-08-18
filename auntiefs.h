@@ -16,6 +16,12 @@ extern const int FUSE_SERIES_DIR_MODE;
 extern const blksize_t FUSE_IVIEW_BLOCK_SIZE;
 extern const blkcnt_t FUSE_IVIEW_BLOCK_COUNT;
 
+struct RtmpSession
+{
+	pthread_mutex_t rtmp_read_lock;
+	RTMP *rtmp;
+};
+
 void *fuse_iview_init(struct fuse_conn_info *conn);
 int fuse_iview_getattr(const char *path, struct stat *attrStat);
 int fuse_iview_readlink(const char *path, char *buffer, size_t size);

@@ -2,7 +2,7 @@ C=gcc --std=c11 -Wall
 OPTIMISE=-O3
 CFLAGS=-c `pkg-config --cflags libxml-2.0` -D_FILE_OFFSET_BITS=64 -DFUSE_USE_VERSION=29 -DDEBUG
 LDFLAGS=-o
-LIBS=`pkg-config --libs libxml-2.0` -ljansson -lrtmp -lfuse
+LIBS=`pkg-config --libs libxml-2.0` -ljansson -lrtmp -lfuse -lpthread
 OBJECTS=main.o auntie.o auntiefs.o
 TARGET=auntie
 
