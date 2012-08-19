@@ -18,42 +18,37 @@
 #include <dirent.h>
 #include <time.h>
 
-#include <librtmp/rtmp.h>
-#include <jansson.h>
-#include <libxml/globals.h>
-#include <libxml/xmlreader.h>
-
-#include "http.h"
-
 #define TRUE 1
 #define FALSE 0
 
 typedef char bool;
+typedef struct RTMP RTMP;
 
-extern const unsigned short IVIEW_PORT;
-extern const char *ABC_MAIN_URL;
-extern const char *IVIEW_CONFIG_URL;
-extern const char *HTTP_HEADER_TRANSFER_ENCODING_CHUNKED;
-extern const char *IVIEW_CONFIG_API_SERIES_INDEX;
-extern const char *IVIEW_CONFIG_API_SERIES;
-extern const char *IVIEW_CONFIG_TIME_FORMAT;
-extern const char *IVIEW_CATEGORIES_URL;
+extern const uint16_t IVIEW_PORT;
+extern const char ABC_MAIN_URL[];
+extern const char IVIEW_CONFIG_URL[];
+extern const char HTTP_HEADER_TRANSFER_ENCODING_CHUNKED[];
+extern const char IVIEW_CONFIG_API_SERIES_INDEX[];
+extern const char IVIEW_CONFIG_API_SERIES[];
+extern const char IVIEW_CONFIG_TIME_FORMAT[];
+extern const char IVIEW_PROGRAM_TIME_FORMAT[];
+extern const char IVIEW_CATEGORIES_URL[];
 extern const size_t IVIEW_SERIES_ID_LENGTH;
 extern const size_t IVIEW_PROGRAM_ID_LENGTH;
 extern const ssize_t IVIEW_RTMP_BUFFER_SIZE;
 extern const int IVIEW_REFRESH_INTERVAL;
-extern const char *IVIEW_DOWNLOAD_EXT;
-extern const char *IVIEW_SWF_URL;
+extern const char IVIEW_DOWNLOAD_EXT[];
+extern const char IVIEW_SWF_URL[];
 extern const uint32_t IVIEW_SWF_SIZE;
 extern const uint8_t IVIEW_SWF_HASH[];
 extern const uint16_t IVIEW_RTMP_PORT;
 extern const unsigned int BYTES_IN_MEGABYTE;
-extern const char *IVIEW_RTMP_AKAMAI_PROTOCOL;
-extern const char *IVIEW_RTMP_AKAMAI_HOST;
-extern const char *IVIEW_RTMP_AKAMAI_APP_PREFIX;
-extern const char *IVIEW_RTMP_AKAMAI_PLAYPATH_PREFIX;
+extern const char IVIEW_RTMP_AKAMAI_PROTOCOL[];
+extern const char IVIEW_RTMP_AKAMAI_HOST[];
+extern const char IVIEW_RTMP_AKAMAI_APP_PREFIX[];
+extern const char IVIEW_RTMP_AKAMAI_PLAYPATH_PREFIX[];
 
-struct IviewConfig
+typedef struct IviewConfig
 {
 	unsigned char *api;
 	unsigned char *auth;
@@ -71,9 +66,9 @@ struct IviewConfig
 	unsigned char *geo;
 	unsigned char *time;
 	unsigned char *feedbackUrl;
-};
+} IviewConfig;
 
-struct IviewAuth
+typedef struct IviewAuth
 {
 	char *ip;
 	char *isp;
@@ -84,27 +79,28 @@ struct IviewAuth
 	char *token;
 	char *text;
 	bool free;
-};
+} IviewAuth;
 
-struct IviewKeyword
+typedef struct IviewKeyword
 {
 	char *text;
 	struct IviewKeyword *next;
-};
+} IviewKeyword;
 
-struct IviewProgram
+typedef struct IviewProgram
 {
 	unsigned int id;
 	char *name;
 	char *desc;
 	char *uri;
-	char *transmissionTime;
-	char *iviewExpiry;
+	struct tm *transmissionTime;
+	struct tm *iviewExpiry;
+	struct tm *unknownHValue;
 	size_t size;
 	struct IviewProgram *next;
-};
+} IviewProgram;
 
-struct IviewSeries
+typedef struct IviewSeries
 {
 	unsigned int id;
 	char *name;
@@ -113,42 +109,44 @@ struct IviewSeries
 	struct IviewKeyword *keyword;
 	struct IviewProgram *program;
 	struct IviewSeries *next;
-};
+} IviewSeries;
 
-struct IviewCategories
+typedef struct IviewCategories
 {
 
-};
+} IviewCategories;
 
-struct Cache
+typedef struct IviewCache
 {
 	struct IviewConfig *config;
 	struct IviewAuth *auth;
 	struct IviewSeries *index;
 	struct IviewCategories *categories;
 	struct tm *lastRefresh;
-};
+} IviewCache;
 
-struct Cache *iview_cache_new();
-void config_fetch(struct Cache *cache);
+void config_fetch(IviewCache *cache);
+IviewProgram *series_parse(IviewSeries *series, const char *json);
 char *strjoin(const char *first, const char *second);
 char *strcreplace(const char *str, const char from, const char to);
-bool iview_cache_index_needs_refresh(const struct Cache *cache);
-void iview_cache_index_refresh(struct Cache *cache);
-void get_programs(const struct Cache *cache, struct IviewSeries *series);
+void get_programs(const IviewCache *cache, IviewSeries *series);
 unsigned char *iview_filename_encode(const unsigned char *fileName);
 unsigned char *iview_filename_decode(const unsigned char *fileName);
-RTMP *download_program_open(struct Cache *cache, const struct IviewProgram *program);
+RTMP *download_program_open(IviewCache *cache, const IviewProgram *program);
 int download_program_read(RTMP *rtmp, char *buffer, size_t size, off_t offset);
 int download_program_close(RTMP *rtmp);
 
-void iview_cache_config_free(struct IviewConfig *config);
-void iview_cache_auth_free(struct IviewAuth *auth);
-void iview_cache_index_free(struct IviewSeries *series);
-void iview_cache_program_free(struct IviewProgram *program);
-void iview_cache_keyword_free(struct IviewKeyword *keyword);
-void iview_cache_categories_free(struct IviewCategories *categories);
+IviewCache *iview_cache_new();
+bool iview_cache_index_needs_refresh(const IviewCache *cache);
+void iview_cache_index_refresh(IviewCache *cache);
+void iview_cache_config_free(IviewConfig *config);
+void iview_cache_auth_free(IviewAuth *auth);
+void iview_cache_index_free(IviewSeries *series);
+void iview_cache_program_free(IviewProgram *program);
+void iview_cache_keyword_free(IviewKeyword *keyword);
+void iview_cache_categories_free(IviewCategories *categories);
 
-void free_null(void *ptr);
+IviewSeries *iview_get_series(const IviewCache *cache, const char *seriesName);
+IviewProgram *iview_get_program(const IviewSeries *series, const char *programName);
 
 #endif // AUNTIE_H

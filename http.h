@@ -1,26 +1,28 @@
 #ifndef HTTP_H
 #define HTTP_H
 
+#include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 
 #define HTTP_BUFFER_SIZE (const int)sysconf(_SC_PAGESIZE)
 
-struct HttpRequest
+typedef struct HttpRequest
 {
 	char *method;
 	char *protocol;
 	char *uri;
 	char *host;
-};
+} HttpRequest;
 
-struct Uri
+typedef struct Uri
 {
 	char *protocol;
 	char *host;
 	char *path;
-};
+} Uri;
 
-struct HttpHeader
+typedef struct HttpHeader
 {
 	char *protocol;
 	unsigned short status;
@@ -37,6 +39,16 @@ struct HttpHeader
 	unsigned int contentLength;
 	char *connection;
 	char *setCookie;
-};
+} HttpHeader;
+
+extern const char HTTP_PROTOCOL_1_1[];
+extern const char HTTP_METHOD_GET[];
+
+HttpRequest *http_request_new();
+void http_request_free(HttpRequest *request);
+
+Uri *uri_new();
+Uri *uri_parse(const char *uriStr);
+void uri_free(Uri *uri);
 
 #endif // HTTP_H

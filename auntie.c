@@ -1,21 +1,27 @@
 #include "auntie.h"
+#include "http.h"
+#include "utils.h"
 
-#include <pthread.h>
+#include <librtmp/rtmp.h>
+#include <jansson.h>
+#include <libxml/globals.h>
+#include <libxml/xmlreader.h>
 
-const unsigned short IVIEW_PORT = 80;
-const char *ABC_MAIN_URL = "www.abc.net.au";
-const char *IVIEW_CONFIG_URL = "/iview/xml/config.xml";
-const char *HTTP_HEADER_TRANSFER_ENCODING_CHUNKED = "chunked";
-const char *IVIEW_CONFIG_API_SERIES_INDEX = "seriesIndex";
-const char *IVIEW_CONFIG_API_SERIES = "series=";
-const char *IVIEW_CONFIG_TIME_FORMAT = "%d/%m/%Y %H:%M:%S";
-const char *IVIEW_CATEGORIES_URL = "xml/categories.xml";
+const uint16_t IVIEW_PORT = 80;
+const char ABC_MAIN_URL[] = "www.abc.net.au";
+const char IVIEW_CONFIG_URL[] = "/iview/xml/config.xml";
+const char HTTP_HEADER_TRANSFER_ENCODING_CHUNKED[] = "chunked";
+const char IVIEW_CONFIG_API_SERIES_INDEX[] = "seriesIndex";
+const char IVIEW_CONFIG_API_SERIES[] = "series=";
+const char IVIEW_CONFIG_TIME_FORMAT[] = "%d/%m/%Y %H:%M:%S";
+const char IVIEW_PROGRAM_TIME_FORMAT[] = "%Y-%m-%d %H:%M:%S";
+const char IVIEW_CATEGORIES_URL[] = "xml/categories.xml";
 const size_t IVIEW_SERIES_ID_LENGTH = 11;
 const size_t IVIEW_PROGRAM_ID_LENGTH = 11;
 const ssize_t IVIEW_RTMP_BUFFER_SIZE = 8192;
 const int IVIEW_REFRESH_INTERVAL = 3600;
-const char *IVIEW_DOWNLOAD_EXT = ".mp4";
-const char *IVIEW_SWF_URL = "http://www.abc.net.au/iview/images/iview.jpg";
+const char IVIEW_DOWNLOAD_EXT[] = ".mp4";
+const char IVIEW_SWF_URL[] = "http://www.abc.net.au/iview/images/iview.jpg";
 const uint32_t IVIEW_SWF_SIZE = 2122;
 const uint8_t IVIEW_SWF_HASH[] = {0x96, 0xcc, 0x76, 0xf1, 0xd5, 0x38, 0x5f, 0xb5,
 								  0xcd, 0xa6, 0xe2, 0xce, 0x5c, 0x73, 0x32, 0x3a,
@@ -23,10 +29,10 @@ const uint8_t IVIEW_SWF_HASH[] = {0x96, 0xcc, 0x76, 0xf1, 0xd5, 0x38, 0x5f, 0xb5
 								  0xdd, 0x80, 0x7e, 0x5c, 0x73, 0xc4, 0x2b, 0x37};
 const uint16_t IVIEW_RTMP_PORT = 1935;
 const unsigned int BYTES_IN_MEGABYTE = 1048576;
-const char *IVIEW_RTMP_AKAMAI_PROTOCOL = "rtmp://";
-const char *IVIEW_RTMP_AKAMAI_HOST = "cp53909.edgefcs.net";
-const char *IVIEW_RTMP_AKAMAI_APP_PREFIX = "/ondemand?auth=";
-const char *IVIEW_RTMP_AKAMAI_PLAYPATH_PREFIX = "mp4:flash/playback/_definst_/";
+const char IVIEW_RTMP_AKAMAI_PROTOCOL[] = "rtmp://";
+const char IVIEW_RTMP_AKAMAI_HOST[] = "cp53909.edgefcs.net";
+const char IVIEW_RTMP_AKAMAI_APP_PREFIX[] = "/ondemand?auth=";
+const char IVIEW_RTMP_AKAMAI_PLAYPATH_PREFIX[] = "mp4:flash/playback/_definst_/";
 
 size_t count(const char *input, const char *seps)
 {
@@ -67,7 +73,7 @@ unsigned int split(const char *input, const char *seps, char ***output)
 	return numTokens;
 }
 
-char http_header_parse_field(struct HttpHeader *header, const char *field)
+char http_header_parse_field(HttpHeader *header, const char *field)
 {
 	unsigned int fieldLen = strlen(field);
 
@@ -126,54 +132,10 @@ unsigned int getline_fd(char **buffer, size_t *bufferSize, int fd)
 	return 0;
 }
 
-struct Uri uri_parse(const char *uriStr)
-{
-	struct Uri uri;
-	unsigned int protocolEnd = -1;
-	unsigned int hostEnd = -1;
-
-	for (unsigned int index = 1; index < strlen(uriStr); index++)
-	{
-		// We have found a protocol.
-		if (uriStr[index] == ':')
-		{
-			uri.protocol = malloc(index + 1);
-			protocolEnd = index + 3;
-
-			strncpy(uri.protocol, uriStr, index);
-			
-			uri.protocol[index] = '\0';
-
-			break;
-		}
-	}
-
-	for (unsigned int index = 1; index + protocolEnd < strlen(uriStr); index++)
-	{
-		if (uriStr[index + protocolEnd - 1] != '/' && uriStr[index + protocolEnd] == '/')
-		{
-			uri.host = malloc(index + 1);
-			hostEnd = index + protocolEnd;
-
-			strncpy(uri.host, uriStr + protocolEnd, index);
-			
-			uri.host[index] = '\0';
-
-			break;
-		}
-	}
-
-	uri.path = malloc(strlen(uriStr - hostEnd + 1));
-
-	strcpy(uri.path, uriStr + hostEnd);
-
-	return uri;
-}
-
-struct IviewConfig *config_parse(const char *xml)
+IviewConfig *config_parse(const char *xml)
 {
 	xmlDocPtr reader = xmlParseMemory(xml, strlen(xml));
-	struct IviewConfig *config = malloc(sizeof(struct IviewConfig));
+	IviewConfig *config = malloc(sizeof(IviewConfig));
 
 	if (strcmp((const char *)reader->children->name, "config"))
 		return NULL;
@@ -266,68 +228,69 @@ struct IviewConfig *config_parse(const char *xml)
 	return config;
 }
 
-struct IviewSeries *index_parse(const char *json)
+IviewSeries *index_parse(const char *json)
 {
 	json_error_t error;
 	json_t *root = json_loads(json, 0, &error);
-	struct IviewSeries *series = NULL;
-	struct IviewSeries *seriesHead = NULL;
+	IviewSeries *series = NULL;
+	IviewSeries *seriesHead = NULL;
 	char *keywords;
+	json_t *field = NULL;
+	json_t *seriesNode = NULL;
 
 	if (json_is_array(root))
 	{
 		for (unsigned int seriesIndex = 0; seriesIndex < json_array_size(root); seriesIndex++)
 		{
-			json_t *nextSeries = json_array_get(root, seriesIndex);
-			json_t *tmp;
+			seriesNode = json_array_get(root, seriesIndex);
 
-			if (json_is_object(nextSeries))
+			if (json_is_object(seriesNode))
 			{
 				if (series)
 				{
-					series->next = malloc(sizeof(struct IviewSeries));
+					series->next = malloc(sizeof(IviewSeries));
 					series = series->next;
 				}
 
 				else
 				{
-					series = malloc(sizeof(struct IviewSeries));
+					series = malloc(sizeof(IviewSeries));
 					seriesHead = series;
 				}
 
 				series->next = NULL;
 
-				tmp = json_object_get(nextSeries, "a");
+				field = json_object_get(seriesNode, "a");
 
-				if (json_is_string(tmp))
-					series->id = atoi(json_string_value(tmp));
+				if (json_is_string(field))
+					series->id = atoi(json_string_value(field));
 
-				tmp = json_object_get(nextSeries, "b");
+				field = json_object_get(seriesNode, "b");
 
-				if (json_is_string(tmp))
-					series->name = (char *)json_string_value(tmp);
+				if (json_is_string(field))
+					series->name = (char *)json_string_value(field);
 
-				tmp = json_object_get(nextSeries, "e");
+				field = json_object_get(seriesNode, "e");
 
-				if (json_is_string(tmp))
+				if (json_is_string(field))
 				{
-					keywords = (char *)json_string_value(tmp);
+					keywords = (char *)json_string_value(field);
 					char **keywordArray = NULL;
 					size_t numKeywords = split(keywords, " ", &keywordArray);
-					struct IviewKeyword *keyword = NULL;
-					struct IviewKeyword *keywordHead = NULL;
+					IviewKeyword *keyword = NULL;
+					IviewKeyword *keywordHead = NULL;
 
 					for (unsigned int keywordIndex = 0; keywordIndex < numKeywords; keywordIndex++)
 					{
 						if (keyword)
 						{
-							keyword->next = malloc(sizeof(struct IviewKeyword));
+							keyword->next = malloc(sizeof(IviewKeyword));
 							keyword = keyword->next;
 						}
 
 						else
 						{
-							keyword = malloc(sizeof(struct IviewKeyword));
+							keyword = malloc(sizeof(IviewKeyword));
 							keywordHead = keyword;
 						}
 
@@ -346,23 +309,37 @@ struct IviewSeries *index_parse(const char *json)
 	return seriesHead;
 }
 
-struct IviewProgram *series_parse(const char *json)
+IviewProgram *series_parse(IviewSeries *series, const char *json)
 {
 	json_error_t error;
 	json_t *root = json_loads(json, 0, &error);
-	struct IviewProgram *program = NULL;
-	struct IviewProgram *programHead = NULL;
+	IviewProgram *program = NULL;
+	IviewProgram *programHead = NULL;
+	json_t *field = NULL;
+	json_t *seriesNode = NULL;
+	json_t *programsNode = NULL;
+	json_t *programNode = NULL;
 
 	if (json_is_array(root))
 	{
 		for (unsigned int seriesIndex = 0; seriesIndex < json_array_size(root); seriesIndex++)
 		{
-			json_t *seriesNode = json_array_get(root, seriesIndex);
+			seriesNode = json_array_get(root, seriesIndex);
 
 			if (json_is_object(seriesNode))
 			{
+				field = json_object_get(seriesNode, "c");
+
+				if (json_is_string(field))
+					series->desc = (char *)json_string_value(field);
+
+				field = json_object_get(seriesNode, "d");
+
+				if (json_is_string(field))
+					series->image = (char *)json_string_value(field);
+
 				// FIXME: Check that data is consistent with series index.
-				json_t *programsNode = json_object_get(seriesNode, "f");
+				programsNode = json_object_get(seriesNode, "f");
 
 				if (json_is_array(programsNode))
 				{
@@ -370,53 +347,74 @@ struct IviewProgram *series_parse(const char *json)
 					{
 						if (!program)
 						{
-							program = malloc(sizeof(struct IviewProgram));
+							program = malloc(sizeof(IviewProgram));
 							programHead = program;
 						}
 
 						else
 						{
-							program->next = malloc(sizeof(struct IviewProgram));
+							program->next = malloc(sizeof(IviewProgram));
 							program = program->next;
 						}
 
 						program->next = NULL;
-						json_t *programNode = json_array_get(programsNode, programIndex);
-						json_t *tmp;
+						programNode = json_array_get(programsNode, programIndex);
+
+						program->transmissionTime = malloc(sizeof(struct tm));
+						program->iviewExpiry = malloc(sizeof(struct tm));
+						program->unknownHValue = malloc(sizeof(struct tm));
+
+						memset(program->transmissionTime, 0, sizeof(*program->transmissionTime));
+						memset(program->iviewExpiry, 0, sizeof(*program->iviewExpiry));
+						memset(program->unknownHValue, 0, sizeof(*program->unknownHValue));
 
 						if (json_is_object(programNode))
 						{
-							tmp = json_object_get(programNode, "a");
+							field = json_object_get(programNode, "a");
 
-							if (json_is_string(tmp))
-								program->id = atoi(json_string_value(tmp));
+							if (json_is_string(field))
+								program->id = atoi(json_string_value(field));
 
-							tmp = json_object_get(programNode, "b");
+							field = json_object_get(programNode, "b");
 
-							if (json_is_string(tmp))
-								program->name = (char *)json_string_value(tmp);
+							if (json_is_string(field))
+								program->name = (char *)json_string_value(field);
 
-							tmp = json_object_get(programNode, "d");
+							field = json_object_get(programNode, "d");
 
-							if (json_is_string(tmp))
-								program->desc = (char *)json_string_value(tmp);
+							if (json_is_string(field))
+								program->desc = (char *)json_string_value(field);
 
-							// TODO: Do others.
-							tmp = json_object_get(programNode, "i");
+							field = json_object_get(programNode, "f");
 
-							if (json_is_string(tmp))
+							if (json_is_string(field))
+								strptime((char *)json_string_value(field), IVIEW_PROGRAM_TIME_FORMAT, program->transmissionTime);
+
+							field = json_object_get(programNode, "g");
+
+							if (json_is_string(field))
+								strptime((char *)json_string_value(field), IVIEW_PROGRAM_TIME_FORMAT, program->iviewExpiry);
+
+							field = json_object_get(programNode, "h");
+
+							if (json_is_string(field))
+								strptime((char *)json_string_value(field), IVIEW_PROGRAM_TIME_FORMAT, program->unknownHValue);
+
+							field = json_object_get(programNode, "i");
+
+							if (json_is_string(field))
 							{
-								char *sizeStr = (char *)json_string_value(tmp);
+								char *sizeStr = (char *)json_string_value(field);
 
 								program->size = atoi((char *)sizeStr) * BYTES_IN_MEGABYTE + BYTES_IN_MEGABYTE;
 
 								free_null(sizeStr);
 							}
 
-							tmp = json_object_get(programNode, "n");
+							field = json_object_get(programNode, "n");
 
-							if (json_is_string(tmp))
-								program->uri = (char *)json_string_value(tmp);
+							if (json_is_string(field))
+								program->uri = (char *)json_string_value(field);
 						}
 					}
 				}
@@ -427,16 +425,16 @@ struct IviewProgram *series_parse(const char *json)
 	return programHead;
 }
 
-struct IviewCategories *categories_parse(const char *xml)
+IviewCategories *categories_parse(const char *xml)
 {
 	return NULL;
 }
 
-struct IviewAuth *auth_parse(const char *xml)
+IviewAuth *auth_parse(const char *xml)
 {
 	xmlDocPtr reader = xmlParseMemory(xml, strlen(xml));
 	xmlNodePtr node = xmlFirstElementChild(reader->children);
-	struct IviewAuth *auth = malloc(sizeof(struct IviewAuth));
+	IviewAuth *auth = malloc(sizeof(IviewAuth));
 
 	while (node)
 	{
@@ -483,7 +481,13 @@ struct tm *time_parse(const char *timeStr)
 {
 	struct tm *lastRefresh = malloc(sizeof(struct tm));
 
+	// strptime() doesn't set all values, but mktime doesn't like this.
+	memset(lastRefresh, 0, sizeof(struct tm));
+
 	strptime(timeStr, IVIEW_CONFIG_TIME_FORMAT, lastRefresh);
+
+	// We also need to set tm_isdst to -1 so that the system has to find out DST settings.
+	lastRefresh->tm_isdst = -1;
 
 	return lastRefresh;
 }
@@ -534,10 +538,10 @@ char *fetch_uri_parse_transfer_chunks(FILE *file)
 	return allChunks;
 }
 
-char *fetch_uri(const struct HttpRequest request)
+char *fetch_uri(const HttpRequest *request)
 {
 	struct sockaddr_in serverAddress;
-	struct hostent *host = gethostbyname(request.host);
+	struct hostent *host = gethostbyname(request->host);
 
 	memset((char *)&serverAddress, 0, sizeof serverAddress);
 
@@ -548,15 +552,15 @@ char *fetch_uri(const struct HttpRequest request)
 	int socketFd = socket(AF_INET, SOCK_STREAM, 0);
 	connect(socketFd, (struct sockaddr*)&serverAddress, sizeof(serverAddress)); 
 	
-	unsigned short requestSize = strlen(request.method)
-							   + strlen(request.uri)
-							   + strlen(request.protocol)
-							   + strlen(request.host)
+	unsigned short requestSize = strlen(request->method)
+							   + strlen(request->uri)
+							   + strlen(request->protocol)
+							   + strlen(request->host)
 							   + 15;
 
 	char requestStr[requestSize];
 
-	sprintf(requestStr, "%s %s %s\r\nHost: %s\r\n\r\n", request.method, request.uri, request.protocol, request.host);
+	sprintf(requestStr, "%s %s %s\r\nHost: %s\r\n\r\n", request->method, request->uri, request->protocol, request->host);
 
 	send(socketFd, requestStr, strlen(requestStr), 0);
 
@@ -566,7 +570,7 @@ char *fetch_uri(const struct HttpRequest request)
 	size_t size = 0;
 	char *line = NULL;
 	ssize_t z = 0;
-	struct HttpHeader header;
+	HttpHeader header;
 	header.contentLength = 0;
 
 	do
@@ -588,200 +592,154 @@ char *fetch_uri(const struct HttpRequest request)
 	{
 		page = malloc(header.contentLength + 1);
 
-		memset(page, '\0', header.contentLength);
+		memset(page, '\0', header.contentLength + 1);
 
 		fread(page, header.contentLength, 1, file);
 	}
 
-	//printf("\n%s\n", page);
-
 	return page;
 }
 
-void config_fetch(struct Cache *cache)
+void config_fetch(IviewCache *cache)
 {
-	struct HttpRequest request;
+	HttpRequest *request = http_request_new();
 
-	request.method = "GET";
-	request.protocol = "HTTP/1.1";
-	request.uri = "/iview/xml/config.xml";
-	request.host = "www.abc.net.au";
+	request->method = strdup(HTTP_METHOD_GET);
+	request->protocol = strdup(HTTP_PROTOCOL_1_1);
+	request->uri = strdup(IVIEW_CONFIG_URL);
+	request->host = strdup(ABC_MAIN_URL);
 
 	char *page = fetch_uri(request);
 
 	cache->config = config_parse(page);
+
+	free_null(page);
+
+	http_request_free(request);
 }
 
-void index_fetch(struct Cache *cache)
+void index_fetch(IviewCache *cache)
 {
-	struct HttpRequest request;
+	HttpRequest *request = http_request_new();
 
-	request.method = "GET";
-	request.protocol = "HTTP/1.1";
+	request->method = strdup(HTTP_METHOD_GET);
+	request->protocol = strdup(HTTP_PROTOCOL_1_1);
 	
-	struct Uri uri = uri_parse((char *)cache->config->api);
+	Uri *uri = uri_parse((char *)cache->config->api);
 
-	request.host = uri.host;
-	request.uri = malloc(strlen((char *)uri.path) + strlen(IVIEW_CONFIG_API_SERIES_INDEX) + 1);
+	request->host = strdup(uri->host);
+	request->uri = malloc(strlen((char *)uri->path) + strlen(IVIEW_CONFIG_API_SERIES_INDEX) + 1);
 
-	strcpy(request.uri, uri.path);
-	strcat(request.uri, IVIEW_CONFIG_API_SERIES_INDEX);
+	strcpy(request->uri, uri->path);
+	strcat(request->uri, IVIEW_CONFIG_API_SERIES_INDEX);
 
 	char *page = fetch_uri(request);
 
 	cache->index = index_parse(page);
+
+	free_null(page);
+
+	http_request_free(request);
+	uri_free(uri);
 }
 
-void categories_fetch(struct Cache *cache)
+void categories_fetch(IviewCache *cache)
 {
-	struct HttpRequest request;
+	HttpRequest *request = http_request_new();
 
-	request.method = "GET";
-	request.protocol = "HTTP/1.1";
-	request.host = (char *)ABC_MAIN_URL;
-	request.uri = malloc(strlen((char *)cache->config->categories) + 2);
+	request->method = strdup(HTTP_METHOD_GET);
+	request->protocol = strdup(HTTP_PROTOCOL_1_1);
+	request->host = strdup(ABC_MAIN_URL);
+	request->uri = malloc(strlen((char *)cache->config->categories) + 2);
 
-	strcpy(request.uri, "/");
-	strcat(request.uri, (char *)cache->config->categories);
+	strcpy(request->uri, "/");
+	strcat(request->uri, (char *)cache->config->categories);
 
 	char *page = fetch_uri(request);
 
 	cache->categories = categories_parse(page);
+
+	free_null(page);
+
+	http_request_free(request);
 }
 
-void auth_fetch(struct Cache *cache)
+void auth_fetch(IviewCache *cache)
 {
-	struct HttpRequest request;
+	HttpRequest *request = http_request_new();
 
-	request.method = "GET";
-	request.protocol = "HTTP/1.1";
+	request->method = strdup(HTTP_METHOD_GET);
+	request->protocol = strdup(HTTP_PROTOCOL_1_1);
 
-	struct Uri uri = uri_parse((char *)cache->config->auth);
+	Uri *uri = uri_parse((char *)cache->config->auth);
 
-	request.host = uri.host;
-	request.uri = uri.path;
+	request->host = strdup(uri->host);
+	request->uri = strdup(uri->path);
 
 	char *page = fetch_uri(request);
 
 	cache->auth = auth_parse(page);
+
+	free_null(page);
+
+	http_request_free(request);
+	uri_free(uri);
 }
 
-void time_fetch(struct Cache *cache)
+void time_fetch(IviewCache *cache)
 {
-	struct HttpRequest request;
+	HttpRequest *request = http_request_new();
 
-	request.method = "GET";
-	request.protocol = "HTTP/1.1";
+	request->method = strdup(HTTP_METHOD_GET);
+	request->protocol = strdup(HTTP_PROTOCOL_1_1);
 
-	struct Uri uri = uri_parse((char *)cache->config->time);
+	Uri *uri = uri_parse((char *)cache->config->time);
 
-	request.host = uri.host;
-	request.uri = uri.path;
+	request->host = strdup(uri->host);
+	request->uri = strdup(uri->path);
 
 	char *page = fetch_uri(request);
 
 	cache->lastRefresh = time_parse(page);
+
+	free_null(page);
+
+	http_request_free(request);
+	uri_free(uri);
 }
 
-struct IviewSeries *get_series(const struct Cache *cache)
-{
-	struct IviewSeries *series = cache->index;
-	char input[IVIEW_SERIES_ID_LENGTH];
-	unsigned int seriesId = 0;
-
-	while (series)
-	{
-		printf("%u\t%s\n", series->id, series->name);
-
-		series = series->next;
-	}
-
-	printf("\nEnter series ID: ");
-
-	char *inputPtr = fgets(input, IVIEW_SERIES_ID_LENGTH, stdin);
-
-	if (inputPtr)
-		seriesId = atoi(input);
-
-	if (seriesId < 1)
-		return NULL;
-
-	series = cache->index;
-
-	while (series)
-	{
-		if (series->id == seriesId)
-			return series;
-
-		series = series->next;
-	}
-
-	return NULL;
-}
-
-void get_programs(const struct Cache *cache, struct IviewSeries *series)
+void get_programs(const IviewCache *cache, IviewSeries *series)
 {
 	iview_cache_program_free(series->program);
 
-	struct HttpRequest request;
+	HttpRequest *request = http_request_new();
 	char seriesIdStr[IVIEW_SERIES_ID_LENGTH];
 
-	request.method = "GET";
-	request.protocol = "HTTP/1.1";
+	request->method = strdup(HTTP_METHOD_GET);
+	request->protocol = strdup(HTTP_PROTOCOL_1_1);
 
-	struct Uri uri = uri_parse((char *)cache->config->api);
+	Uri *uri = uri_parse((char *)cache->config->api);
 
 	sprintf(seriesIdStr, "%u", series->id);
 
-	request.host = uri.host;
-	request.uri = malloc(strlen((char *)uri.path) + strlen(IVIEW_CONFIG_API_SERIES) + strlen(seriesIdStr) + 1);
+	request->host = strdup(uri->host);
+	request->uri = malloc(strlen((char *)uri->path) + strlen(IVIEW_CONFIG_API_SERIES) + strlen(seriesIdStr) + 1);
 
-	strcpy(request.uri, uri.path);
-	strcat(request.uri, IVIEW_CONFIG_API_SERIES);
-	strcat(request.uri, seriesIdStr);
+	strcpy(request->uri, uri->path);
+	strcat(request->uri, IVIEW_CONFIG_API_SERIES);
+	strcat(request->uri, seriesIdStr);
 
 	char *page = fetch_uri(request);
 
-	series->program = series_parse(page);
+	series->program = series_parse(series, page);
+
+	free_null(page);
+
+	http_request_free(request);
+	uri_free(uri);
 }
 
-struct IviewProgram *select_program(const struct IviewSeries *series)
-{
-	struct IviewProgram *program = series->program;
-	char input[IVIEW_PROGRAM_ID_LENGTH];
-	unsigned int programId = 0;
-
-	while (program)
-	{
-		printf("%u\t%s\n", program->id, program->name);
-
-		program = program->next;
-	}
-
-	printf("\nEnter program ID: ");
-
-	char *inputPtr = fgets(input, IVIEW_PROGRAM_ID_LENGTH, stdin);
-
-	if (inputPtr)
-		programId = atoi(input);
-
-	if (programId > 0)
-	{
-		program = series->program;
-
-		while (program)
-		{
-			if (program->id == programId)
-				return program;
-
-			program = program->next;
-		}
-	}
-
-	return NULL;
-}
-
-RTMP *download_program_open(struct Cache *cache, const struct IviewProgram *program)
+RTMP *download_program_open(IviewCache *cache, const IviewProgram *program)
 {
 	// Create session handle and initialise.
 	RTMP *rtmp = RTMP_Alloc();
@@ -817,34 +775,33 @@ RTMP *download_program_open(struct Cache *cache, const struct IviewProgram *prog
 	strcat(playpathUrl, program->uri);
 
 	AVal host = {(char *)IVIEW_RTMP_AKAMAI_HOST, strlen((char *)IVIEW_RTMP_AKAMAI_HOST)};
-	AVal flashVer = {RTMP_DefaultFlashVer.av_val, RTMP_DefaultFlashVer.av_len};
 	AVal sockshost = {NULL, 0};
 	AVal playpath = {playpathUrl, strlen(playpathUrl)};
 	AVal tcUrl = {targetUrl, strlen(targetUrl)};
 	AVal swf = {(char *)IVIEW_SWF_URL, strlen((char *)IVIEW_SWF_URL)};
-	AVal page = {NULL, 0};
 	AVal app = {appUrl, strlen(appUrl)};
 	AVal auth = {cache->auth->token, strlen(cache->auth->token)};
 	AVal hash = {(char *)IVIEW_SWF_HASH, RTMP_SWF_HASHLEN};
-	AVal sub = {NULL, 0};
 
 	RTMP_Init(rtmp);
 	RTMP_SetupStream(rtmp, RTMP_PROTOCOL_RTMP,
 		&host, IVIEW_RTMP_PORT, &sockshost, &playpath, &tcUrl, &swf,
-		&page, &app, &auth, &hash, IVIEW_SWF_SIZE, &flashVer, &sub, 0, 0, FALSE, 30);
+		NULL, &app, &auth, &hash, IVIEW_SWF_SIZE, NULL, NULL, 0, 0, FALSE, 30);
 
-	printf("\nProtocol: %s", RTMPProtocolStringsLower[rtmp->Link.protocol&7]);
-	printf("\nHost: %s", rtmp->Link.hostname.av_val);
-	printf("\nPort: %i", rtmp->Link.port);
-	printf("\nSockshost: %s", rtmp->Link.sockshost.av_val);
-	printf("\nPlaypath: %s", rtmp->Link.playpath.av_val);
-	printf("\nTcUrl: %s", rtmp->Link.tcUrl.av_val);
-	printf("\nSwfUrl: %s", rtmp->Link.swfUrl.av_val);
-	printf("\nPageUrl: %s", rtmp->Link.pageUrl.av_val);
-	printf("\nApp: %s", rtmp->Link.app.av_val);
-	printf("\nAuth: %s", rtmp->Link.auth.av_val);
-	printf("\nApp: %s %i", app.av_val, app.av_len);
-	printf("\nHash: %s %i", hash.av_val, hash.av_len);
+	#ifdef DEBUG
+	syslog(LOG_INFO, "\nProtocol: %s", RTMPProtocolStringsLower[rtmp->Link.protocol&7]);
+	syslog(LOG_INFO, "\nHost: %s", rtmp->Link.hostname.av_val);
+	syslog(LOG_INFO, "\nPort: %i", rtmp->Link.port);
+	syslog(LOG_INFO, "\nSockshost: %s", rtmp->Link.sockshost.av_val);
+	syslog(LOG_INFO, "\nPlaypath: %s", rtmp->Link.playpath.av_val);
+	syslog(LOG_INFO, "\nTcUrl: %s", rtmp->Link.tcUrl.av_val);
+	syslog(LOG_INFO, "\nSwfUrl: %s", rtmp->Link.swfUrl.av_val);
+	syslog(LOG_INFO, "\nPageUrl: %s", rtmp->Link.pageUrl.av_val);
+	syslog(LOG_INFO, "\nApp: %s", rtmp->Link.app.av_val);
+	syslog(LOG_INFO, "\nAuth: %s", rtmp->Link.auth.av_val);
+	syslog(LOG_INFO, "\nApp: %s %i", app.av_val, app.av_len);
+	syslog(LOG_INFO, "\nHash: %s %i", hash.av_val, hash.av_len);
+	#endif // DEBUG
 
 	if (!RTMP_Connect(rtmp, NULL))
 	{
@@ -898,25 +855,22 @@ int download_program_close(RTMP *rtmp)
 	return 0;
 }
 
-bool iview_cache_index_needs_refresh(const struct Cache *cache)
+bool iview_cache_index_needs_refresh(const IviewCache *cache)
 {
 	if (!cache->index || !cache->lastRefresh)
 		return TRUE;
 
-	time_t refreshTs = mktime(cache->lastRefresh);
-	time_t currentTs = time(NULL);
-
-	return (currentTs - refreshTs) > IVIEW_REFRESH_INTERVAL;
+	return (time(NULL) - mktime(cache->lastRefresh)) > IVIEW_REFRESH_INTERVAL;
 }
 
-void iview_cache_index_refresh(struct Cache *cache)
+void iview_cache_index_refresh(IviewCache *cache)
 {
 	index_fetch(cache);
 	categories_fetch(cache);
 	time_fetch(cache);
 }
 
-void iview_cache_config_free(struct IviewConfig *config)
+void iview_cache_config_free(IviewConfig *config)
 {
 	if (!config)
 		return;
@@ -936,51 +890,60 @@ void iview_cache_config_free(struct IviewConfig *config)
 	free_null(config->feedbackUrl);
 }
 
-void iview_cache_auth_free(struct IviewAuth *auth)
+void iview_cache_auth_free(IviewAuth *auth)
 {
 	if (!auth)
 		return;
 
-	free(auth->ip);
-	free(auth->isp);
-	free(auth->desc);
-	free(auth->host);
-	free(auth->server);
-	free(auth->bwTest);
-	free(auth->token);
-	free(auth->text);
+	free_null(auth->ip);
+	free_null(auth->isp);
+	free_null(auth->desc);
+	free_null(auth->host);
+	free_null(auth->server);
+	free_null(auth->bwTest);
+	free_null(auth->token);
+	free_null(auth->text);
 }
 
-void iview_cache_index_free(struct IviewSeries *series)
+void iview_cache_index_free(IviewSeries *series)
 {
 	if (!series)
 		return;
 
-	struct IviewSeries *nextSeries = series->next;
+	IviewSeries *nextSeries = NULL;
 
 	while (series)
 	{
+		nextSeries = series->next;
+
 		iview_cache_program_free(series->program);
 
 		free_null(series->name);
-		free_null(series->desc);
-		free_null(series->image);
+
+		// Desc is only set if programs are loaded for the series.
+		if (series->desc)
+			free_null(series->desc);
+		
+		if (series->image)
+			free_null(series->image);
+		
 		free(series);
 
 		series = nextSeries;
-		nextSeries = series->next;
 	}
 }
 
-void iview_cache_program_free(struct IviewProgram *program)
+void iview_cache_program_free(IviewProgram *program)
 {
 	if (!program)
 		return;
 
-	struct IviewProgram *nextProgram = program->next;
+	IviewProgram *nextProgram = NULL;
 
 	while (program)
 	{
+		nextProgram = program->next;
+		
 		free_null(program->name);
 		free_null(program->desc);
 		free_null(program->uri);
@@ -989,43 +952,35 @@ void iview_cache_program_free(struct IviewProgram *program)
 		free(program);
 
 		program = nextProgram;
-		nextProgram = program->next;
 	}
 }
 
-void iview_cache_keyword_free(struct IviewKeyword *keyword)
+void iview_cache_keyword_free(IviewKeyword *keyword)
 {
 	if (!keyword)
 		return;
 
-	struct IviewKeyword *nextKeyword = keyword->next;
+	IviewKeyword *nextKeyword = NULL;
 
 	while (keyword)
 	{
+		nextKeyword = keyword->next;
+
 		free_null(keyword->text);
 		free(keyword);
 
 		keyword = nextKeyword;
-		nextKeyword = keyword->next;
 	}
 }
 
-void iview_cache_categories_free(struct IviewCategories *categories)
+void iview_cache_categories_free(IviewCategories *categories)
 {
 
-}
-
-void handle_sigint(int sig)
-{
-	printf("\nRecieved SIGINT, exiting...\n");
-
-	exit(0);
 }
 
 char *strjoin(const char *first, const char *second)
 {
 	unsigned int joinedLen = strlen(first) + strlen(second) + 1;
-
 	char *joined = malloc(joinedLen);
 
 	strcpy(joined, first);
@@ -1047,11 +1002,11 @@ char *strcreplace(const char *str, const char from, const char to)
 	return retStr;
 }
 
-struct Cache *iview_cache_new()
+IviewCache *iview_cache_new()
 {
-	struct Cache *cache = malloc(sizeof(struct Cache));
+	IviewCache *cache = malloc(sizeof(IviewCache));
 
-	memset(cache, 0, sizeof(struct Cache));
+	memset(cache, 0, sizeof(IviewCache));
 
 	return cache;
 }
@@ -1123,9 +1078,32 @@ unsigned char *iview_filename_decode(const unsigned char *fileName)
 	return outName;
 }
 
-void free_null(void *ptr)
+IviewSeries *iview_get_series(const IviewCache *cache, const char *seriesName)
 {
-	free(ptr);
+	IviewSeries *series = cache->index;
 
-	ptr = NULL;
+	while (series)
+	{
+		if (!strcmp(series->name, seriesName))
+			return series;
+
+		series = series->next;
+	}
+
+	return NULL;
+}
+
+IviewProgram *iview_get_program(const IviewSeries *series, const char *programName)
+{
+	IviewProgram *program = series->program;
+
+	while (program)
+	{
+		if (!strcmp(program->name, programName))
+			return program;
+
+		program = program->next;
+	}
+
+	return NULL;
 }
