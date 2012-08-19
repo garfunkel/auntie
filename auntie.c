@@ -417,6 +417,7 @@ IviewAuth *auth_parse(const char *xml)
 	}
 
 	xmlFreeDoc(reader);
+	xmlCleanupParser();
 
 	return auth;
 }
