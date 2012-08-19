@@ -73,65 +73,6 @@ unsigned int split(const char *input, const char *seps, char ***output)
 	return numTokens;
 }
 
-char http_header_parse_field(HttpHeader *header, const char *field)
-{
-	unsigned int fieldLen = strlen(field);
-
-	char *key = strtok((char *)field, ":");
-
-	if (strlen(key) == fieldLen)
-	{
-		header->protocol = strtok(key, " ");
-		header->status = atoi(strtok(NULL, " "));
-		header->statusMsg = strtok(NULL, "\r");
-	}
-
-	else
-	{
-		char *value = strtok(NULL, "\r");
-
-		if (!strcmp(key, "Server"))
-			header->server = value;
-
-		else if (!strcmp(key, "Last-Modified"))
-			header->lastModified = value;
-
-		else if (!strcmp(key, "ETag"))
-			header->eTag = value;
-
-		else if (!strcmp(key, "Content-Type"))
-			header->contentType = value;
-
-		else if (!strcmp(key, "Expires"))
-			header->expires = value;
-
-		else if (!strcmp(key, "Cache-Control"))
-			header->cacheControl = value;
-
-		else if (!strcmp(key, "Pragma"))
-			header->pragma = value;
-
-		else if (!strcmp(key, "Date"))
-			header->date = value;
-
-		else if (!strcmp(key, "Content-Length"))
-			header->contentLength = atoi(value);
-
-		else if (!strcmp(key, "Connection"))
-			header->connection = value;
-
-		else if (!strcmp(key, "Set-Cookie"))
-			header->setCookie = value;
-	}
-
-	return 0;
-}
-
-unsigned int getline_fd(char **buffer, size_t *bufferSize, int fd)
-{
-	return 0;
-}
-
 IviewConfig *config_parse(const char *xml)
 {
 	xmlDocPtr reader = xmlParseMemory(xml, strlen(xml));
@@ -147,16 +88,16 @@ IviewConfig *config_parse(const char *xml)
 		if (!strcmp((const char *)node->name, "param"))
 		{
 			xmlAttrPtr property = node->properties;
-			unsigned char *name = NULL;
-			unsigned char *value = NULL;
+			char *name = NULL;
+			char *value = NULL;
 
 			while (property)
 			{
 				if (!strcmp((const char *)property->name, "name"))
-					name = property->children->content;
+					name = (char *)property->children->content;
 
 				else if (!strcmp((const char *)property->name, "value"))
-					value = property->children->content;
+					value = (char *)property->children->content;
 
 				if (name && value)
 					break;
@@ -167,22 +108,22 @@ IviewConfig *config_parse(const char *xml)
 			if (name && value)
 			{
 				if (!strcmp((char *)name, "api"))
-					config->api = value;
+					config->api = strdup(value);
 
 				else if (!strcmp((char *)name, "auth"))
-					config->auth = value;
+					config->auth = strdup(value);
 
 				else if (!strcmp((char *)name, "tray"))
-					config->tray = value;
+					config->tray = strdup(value);
 
 				else if (!strcmp((char *)name, "categories"))
-					config->categories = value;
+					config->categories = strdup(value);
 
 				else if (!strcmp((char *)name, "classifications"))
-					config->classifications = value;
+					config->classifications = strdup(value);
 
 				else if (!strcmp((char *)name, "captions"))
-					config->captions = value;
+					config->captions = strdup(value);
 
 				else if (!strcmp((char *)name, "captions_offset"))
 					config->captionsOffset = atoi((char *)value);
@@ -200,30 +141,33 @@ IviewConfig *config_parse(const char *xml)
 				}
 
 				else if (!strcmp((char *)name, "server_streaming"))
-					config->serverStreaming = value;
+					config->serverStreaming = strdup(value);
 
 				else if (!strcmp((char *)name, "server_fallback"))
-					config->serverFallback = value;
+					config->serverFallback = strdup(value);
 
 				else if (!strcmp((char *)name, "highlights"))
-					config->highlights = value;
+					config->highlights = strdup(value);
 
 				else if (!strcmp((char *)name, "home"))
-					config->home = value;
+					config->home = strdup(value);
 
 				else if (!strcmp((char *)name, "geo"))
-					config->geo = value;
+					config->geo = strdup(value);
 
 				else if (!strcmp((char *)name, "time"))
-					config->time = value;
+					config->time = strdup(value);
 
 				else if (!strcmp((char *)name, "feedback_url"))
-					config->feedbackUrl = value;
+					config->feedbackUrl = strdup(value);
 			}
 		}
 
 		node = node->next;
 	}
+
+	xmlFreeDoc(reader);
+	xmlCleanupParser();
 
 	return config;
 }
@@ -234,7 +178,6 @@ IviewSeries *index_parse(const char *json)
 	json_t *root = json_loads(json, 0, &error);
 	IviewSeries *series = NULL;
 	IviewSeries *seriesHead = NULL;
-	char *keywords;
 	json_t *field = NULL;
 	json_t *seriesNode = NULL;
 
@@ -248,13 +191,13 @@ IviewSeries *index_parse(const char *json)
 			{
 				if (series)
 				{
-					series->next = malloc(sizeof(IviewSeries));
+					series->next = iview_series_new();
 					series = series->next;
 				}
 
 				else
 				{
-					series = malloc(sizeof(IviewSeries));
+					series = iview_series_new();
 					seriesHead = series;
 				}
 
@@ -268,15 +211,14 @@ IviewSeries *index_parse(const char *json)
 				field = json_object_get(seriesNode, "b");
 
 				if (json_is_string(field))
-					series->name = (char *)json_string_value(field);
+					series->name = strdup(json_string_value(field));
 
 				field = json_object_get(seriesNode, "e");
 
 				if (json_is_string(field))
 				{
-					keywords = (char *)json_string_value(field);
 					char **keywordArray = NULL;
-					size_t numKeywords = split(keywords, " ", &keywordArray);
+					size_t numKeywords = split(json_string_value(field), " ", &keywordArray);
 					IviewKeyword *keyword = NULL;
 					IviewKeyword *keywordHead = NULL;
 
@@ -284,19 +226,21 @@ IviewSeries *index_parse(const char *json)
 					{
 						if (keyword)
 						{
-							keyword->next = malloc(sizeof(IviewKeyword));
+							keyword->next = iview_keyword_new();
 							keyword = keyword->next;
 						}
 
 						else
 						{
-							keyword = malloc(sizeof(IviewKeyword));
+							keyword = iview_keyword_new();
 							keywordHead = keyword;
 						}
 
 						keyword->next = NULL;
 						keyword->text = keywordArray[keywordIndex];
 					}
+
+					free_null(keywordArray);
 
 					series->keyword = keywordHead;
 				}
@@ -305,6 +249,8 @@ IviewSeries *index_parse(const char *json)
 			series->program = NULL;
 		}
 	}
+
+	json_decref(root);
 
 	return seriesHead;
 }
@@ -331,12 +277,12 @@ IviewProgram *series_parse(IviewSeries *series, const char *json)
 				field = json_object_get(seriesNode, "c");
 
 				if (json_is_string(field))
-					series->desc = (char *)json_string_value(field);
+					series->desc = strdup(json_string_value(field));
 
 				field = json_object_get(seriesNode, "d");
 
 				if (json_is_string(field))
-					series->image = (char *)json_string_value(field);
+					series->image = strdup(json_string_value(field));
 
 				// FIXME: Check that data is consistent with series index.
 				programsNode = json_object_get(seriesNode, "f");
@@ -347,13 +293,13 @@ IviewProgram *series_parse(IviewSeries *series, const char *json)
 					{
 						if (!program)
 						{
-							program = malloc(sizeof(IviewProgram));
+							program = iview_program_new();
 							programHead = program;
 						}
 
 						else
 						{
-							program->next = malloc(sizeof(IviewProgram));
+							program->next = iview_program_new();
 							program = program->next;
 						}
 
@@ -378,12 +324,12 @@ IviewProgram *series_parse(IviewSeries *series, const char *json)
 							field = json_object_get(programNode, "b");
 
 							if (json_is_string(field))
-								program->name = (char *)json_string_value(field);
+								program->name = strdup(json_string_value(field));
 
 							field = json_object_get(programNode, "d");
 
 							if (json_is_string(field))
-								program->desc = (char *)json_string_value(field);
+								program->desc = strdup(json_string_value(field));
 
 							field = json_object_get(programNode, "f");
 
@@ -403,24 +349,20 @@ IviewProgram *series_parse(IviewSeries *series, const char *json)
 							field = json_object_get(programNode, "i");
 
 							if (json_is_string(field))
-							{
-								char *sizeStr = (char *)json_string_value(field);
-
-								program->size = atoi((char *)sizeStr) * BYTES_IN_MEGABYTE + BYTES_IN_MEGABYTE;
-
-								free_null(sizeStr);
-							}
+								program->size = atoi((char *)json_string_value(field)) * BYTES_IN_MEGABYTE + BYTES_IN_MEGABYTE;
 
 							field = json_object_get(programNode, "n");
 
 							if (json_is_string(field))
-								program->uri = (char *)json_string_value(field);
+								program->uri = strdup(json_string_value(field));
 						}
 					}
 				}
 			}
 		}
 	}
+
+	json_decref(root);
 
 	return programHead;
 }
@@ -439,28 +381,28 @@ IviewAuth *auth_parse(const char *xml)
 	while (node)
 	{
 		if (!strcmp((char *)node->name, "ip"))
-			auth->ip = (char *)xmlNodeGetContent(node);
+			auth->ip = strdup((char *)xmlNodeGetContent(node));
 
 		else if (!strcmp((char *)node->name, "isp"))
-			auth->isp = (char *)xmlNodeGetContent(node);
+			auth->isp = strdup((char *)xmlNodeGetContent(node));
 
 		else if (!strcmp((char *)node->name, "desc"))
-			auth->desc = (char *)xmlNodeGetContent(node);
+			auth->desc = strdup((char *)xmlNodeGetContent(node));
 
 		else if (!strcmp((char *)node->name, "host"))
-			auth->host = (char *)xmlNodeGetContent(node);
+			auth->host = strdup((char *)xmlNodeGetContent(node));
 
 		else if (!strcmp((char *)node->name, "server"))
-			auth->server = (char *)xmlNodeGetContent(node);
+			auth->server = strdup((char *)xmlNodeGetContent(node));
 
 		else if (!strcmp((char *)node->name, "bwtest"))
-			auth->bwTest = (char *)xmlNodeGetContent(node);
+			auth->bwTest = strdup((char *)xmlNodeGetContent(node));
 
 		else if (!strcmp((char *)node->name, "token"))
-			auth->token = (char *)xmlNodeGetContent(node);
+			auth->token = strdup((char *)xmlNodeGetContent(node));
 
 		else if (!strcmp((char *)node->name, "text"))
-			auth->text = (char *)xmlNodeGetContent(node);
+			auth->text = strdup((char *)xmlNodeGetContent(node));
 
 		else if (!strcmp((char *)node->name, "free"))
 		{
@@ -473,6 +415,8 @@ IviewAuth *auth_parse(const char *xml)
 
 		node = xmlNextElementSibling(node);
 	}
+
+	xmlFreeDoc(reader);
 
 	return auth;
 }
@@ -535,6 +479,8 @@ char *fetch_uri_parse_transfer_chunks(FILE *file)
 		firstChunk = FALSE;
 	} while (chunkSize > 0);
 
+	free_null(line);
+
 	return allChunks;
 }
 
@@ -583,6 +529,8 @@ char *fetch_uri(const HttpRequest *request)
 		http_header_parse_field(&header, line);
 	} while(z > 2);
 
+	free_null(line);
+
 	char *page = NULL;
 
 	if (header.contentLength == 0)
@@ -596,6 +544,8 @@ char *fetch_uri(const HttpRequest *request)
 
 		fread(page, header.contentLength, 1, file);
 	}
+
+	fclose(file);
 
 	return page;
 }
@@ -888,6 +838,8 @@ void iview_cache_config_free(IviewConfig *config)
 	free_null(config->geo);
 	free_null(config->time);
 	free_null(config->feedbackUrl);
+
+	free_null(config);
 }
 
 void iview_cache_auth_free(IviewAuth *auth)
@@ -903,6 +855,35 @@ void iview_cache_auth_free(IviewAuth *auth)
 	free_null(auth->bwTest);
 	free_null(auth->token);
 	free_null(auth->text);
+
+	free_null(auth);
+}
+
+IviewSeries *iview_series_new()
+{
+	IviewSeries *series = malloc(sizeof(IviewSeries));
+
+	memset(series, 0, sizeof(*series));
+
+	return series;
+}
+
+IviewProgram *iview_program_new()
+{
+	IviewProgram *program = malloc(sizeof(IviewProgram));
+
+	memset(program, 0, sizeof(*program));
+
+	return program;
+}
+
+IviewKeyword *iview_keyword_new()
+{
+	IviewKeyword *keyword = malloc(sizeof(IviewKeyword));
+
+	memset(keyword, 0, sizeof(*keyword));
+
+	return keyword;
 }
 
 void iview_cache_index_free(IviewSeries *series)
@@ -917,6 +898,7 @@ void iview_cache_index_free(IviewSeries *series)
 		nextSeries = series->next;
 
 		iview_cache_program_free(series->program);
+		iview_cache_keyword_free(series->keyword);
 
 		free_null(series->name);
 
@@ -943,12 +925,13 @@ void iview_cache_program_free(IviewProgram *program)
 	while (program)
 	{
 		nextProgram = program->next;
-		
+
 		free_null(program->name);
 		free_null(program->desc);
 		free_null(program->uri);
 		free_null(program->transmissionTime);
 		free_null(program->iviewExpiry);
+		free_null(program->unknownHValue);
 		free(program);
 
 		program = nextProgram;

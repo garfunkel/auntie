@@ -13,6 +13,60 @@ HttpRequest *http_request_new()
 	return request;
 }
 
+char http_header_parse_field(HttpHeader *header, const char *field)
+{
+	unsigned int fieldLen = strlen(field);
+
+	char *key = strtok((char *)field, ":");
+
+	if (strlen(key) == fieldLen)
+	{
+		header->protocol = strtok(key, " ");
+		header->status = atoi(strtok(NULL, " "));
+		header->statusMsg = strtok(NULL, "\r");
+	}
+
+	else
+	{
+		char *value = strtok(NULL, "\r");
+
+		if (!strcmp(key, "Server"))
+			header->server = value;
+
+		else if (!strcmp(key, "Last-Modified"))
+			header->lastModified = value;
+
+		else if (!strcmp(key, "ETag"))
+			header->eTag = value;
+
+		else if (!strcmp(key, "Content-Type"))
+			header->contentType = value;
+
+		else if (!strcmp(key, "Expires"))
+			header->expires = value;
+
+		else if (!strcmp(key, "Cache-Control"))
+			header->cacheControl = value;
+
+		else if (!strcmp(key, "Pragma"))
+			header->pragma = value;
+
+		else if (!strcmp(key, "Date"))
+			header->date = value;
+
+		else if (!strcmp(key, "Content-Length"))
+			header->contentLength = atoi(value);
+
+		else if (!strcmp(key, "Connection"))
+			header->connection = value;
+
+		else if (!strcmp(key, "Set-Cookie"))
+			header->setCookie = value;
+	}
+
+	return 0;
+}
+
 void http_request_free(HttpRequest *request)
 {
 	if (request->method)

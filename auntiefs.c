@@ -109,10 +109,10 @@ int fuse_iview_getattr(const char *path, struct stat *attrStat)
 			return -ENOENT;
 	}
 
-	//free_null(programName);
-	//free_null(decodedProgramName);
-	//free_null(seriesName);
-	//free_null(decodedSeriesName);
+	free_null(programName);
+	free_null(decodedProgramName);
+	free_null(seriesName);
+	free_null(decodedSeriesName);
 
 	return status;
 }
@@ -179,6 +179,8 @@ int fuse_iview_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, o
 		}
 	}
 
+	free_null(seriesName);
+
 	filler(buffer, ".", NULL, 0);
 	filler(buffer, "..", NULL, 0);
 
@@ -187,11 +189,16 @@ int fuse_iview_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, o
 
 int fuse_iview_opendir(const char *path, struct fuse_file_info *info)
 {
-	// Directory only valid if root, or series.
-	if (strcmp(path, "/") && !fuse_get_iview_series_name_from_path(path))
-		return -ENOENT;
+	char *seriesName = fuse_get_iview_series_name_from_path(path);
+	int status = 0;
 
-	return 0;
+	// Directory only valid if root, or series.
+	if (strcmp(path, "/") && !seriesName)
+		status = -ENOENT;
+
+	free_null(seriesName);
+
+	return status;
 }
 
 int fuse_iview_open(const char *path, struct fuse_file_info *info)
@@ -357,7 +364,7 @@ char *fuse_get_iview_series_name_from_path(const char *path)
 	}
 
 	if (seriesEnd == 0)
-		return (char *)(path + strlen(FUSE_SERIES_ROOT));
+		return strdup(path + strlen(FUSE_SERIES_ROOT));
 
 	return strndup((char *)(path + strlen(FUSE_SERIES_ROOT)), seriesEnd);
 }

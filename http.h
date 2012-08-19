@@ -45,6 +45,7 @@ extern const char HTTP_PROTOCOL_1_1[];
 extern const char HTTP_METHOD_GET[];
 
 HttpRequest *http_request_new();
+char http_header_parse_field(HttpHeader *header, const char *field);
 void http_request_free(HttpRequest *request);
 
 Uri *uri_new();

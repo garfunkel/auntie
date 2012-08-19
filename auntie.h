@@ -50,22 +50,22 @@ extern const char IVIEW_RTMP_AKAMAI_PLAYPATH_PREFIX[];
 
 typedef struct IviewConfig
 {
-	unsigned char *api;
-	unsigned char *auth;
-	unsigned char *tray;
-	unsigned char *categories;
-	unsigned char *classifications;
-	unsigned char *captions;
+	char *api;
+	char *auth;
+	char *tray;
+	char *categories;
+	char *classifications;
+	char *captions;
 	short captionsOffset;
 	short captionsLiveOffset;
 	bool liveStreaming;
-	unsigned char *serverStreaming;
-	unsigned char *serverFallback;
-	unsigned char *highlights;
-	unsigned char *home;
-	unsigned char *geo;
-	unsigned char *time;
-	unsigned char *feedbackUrl;
+	char *serverStreaming;
+	char *serverFallback;
+	char *highlights;
+	char *home;
+	char *geo;
+	char *time;
+	char *feedbackUrl;
 } IviewConfig;
 
 typedef struct IviewAuth
@@ -137,6 +137,9 @@ int download_program_read(RTMP *rtmp, char *buffer, size_t size, off_t offset);
 int download_program_close(RTMP *rtmp);
 
 IviewCache *iview_cache_new();
+IviewSeries *iview_series_new();
+IviewProgram *iview_program_new();
+IviewKeyword *iview_keyword_new();
 bool iview_cache_index_needs_refresh(const IviewCache *cache);
 void iview_cache_index_refresh(IviewCache *cache);
 void iview_cache_config_free(IviewConfig *config);
