@@ -76,11 +76,11 @@ unsigned int split(const char *input, const char *seps, char ***output)
 IviewConfig *config_parse(const char *xml)
 {
 	xmlDocPtr reader = xmlParseMemory(xml, strlen(xml));
-	IviewConfig *config = malloc(sizeof(IviewConfig));
 
 	if (strcmp((const char *)reader->children->name, "config"))
 		return NULL;
 
+	IviewConfig *config = iview_config_new();
 	xmlNodePtr node = reader->children->children;
 
 	while (node)
@@ -167,7 +167,6 @@ IviewConfig *config_parse(const char *xml)
 	}
 
 	xmlFreeDoc(reader);
-	xmlCleanupParser();
 
 	return config;
 }
@@ -375,49 +374,55 @@ IviewCategories *categories_parse(const char *xml)
 IviewAuth *auth_parse(const char *xml)
 {
 	xmlDocPtr reader = xmlParseMemory(xml, strlen(xml));
-	xmlNodePtr node = xmlFirstElementChild(reader->children);
-	IviewAuth *auth = malloc(sizeof(IviewAuth));
+
+	if (strcmp((char *)reader->children->name, "iview"))
+		return NULL;
+
+	IviewAuth *auth = iview_auth_new();
+	xmlNodePtr node = reader->children->children;
 
 	while (node)
 	{
-		if (!strcmp((char *)node->name, "ip"))
-			auth->ip = strdup((char *)xmlNodeGetContent(node));
-
-		else if (!strcmp((char *)node->name, "isp"))
-			auth->isp = strdup((char *)xmlNodeGetContent(node));
-
-		else if (!strcmp((char *)node->name, "desc"))
-			auth->desc = strdup((char *)xmlNodeGetContent(node));
-
-		else if (!strcmp((char *)node->name, "host"))
-			auth->host = strdup((char *)xmlNodeGetContent(node));
-
-		else if (!strcmp((char *)node->name, "server"))
-			auth->server = strdup((char *)xmlNodeGetContent(node));
-
-		else if (!strcmp((char *)node->name, "bwtest"))
-			auth->bwTest = strdup((char *)xmlNodeGetContent(node));
-
-		else if (!strcmp((char *)node->name, "token"))
-			auth->token = strdup((char *)xmlNodeGetContent(node));
-
-		else if (!strcmp((char *)node->name, "text"))
-			auth->text = strdup((char *)xmlNodeGetContent(node));
-
-		else if (!strcmp((char *)node->name, "free"))
+		if (node->type == XML_ELEMENT_NODE)
 		{
-			if (!strcmp((char *)xmlNodeGetContent(node), "yes"))
-				auth->free = TRUE;
+			if (!strcmp((char *)node->name, "ip"))
+				auth->ip = strdup((char *)node->children->content);
 
-			else
-				auth->free = FALSE;
+			else if (!strcmp((char *)node->name, "isp"))
+				auth->isp = strdup((char *)node->children->content);
+
+			else if (!strcmp((char *)node->name, "desc"))
+				auth->desc = strdup((char *)node->children->content);
+
+			else if (!strcmp((char *)node->name, "host"))
+				auth->host = strdup((char *)node->children->content);
+
+			else if (!strcmp((char *)node->name, "server"))
+				auth->server = strdup((char *)node->children->content);
+
+			else if (!strcmp((char *)node->name, "bwtest"))
+				auth->bwTest = strdup((char *)node->children->content);
+
+			else if (!strcmp((char *)node->name, "token"))
+				auth->token = strdup((char *)node->children->content);
+
+			else if (!strcmp((char *)node->name, "text"))
+				auth->text = strdup((char *)node->children->content);
+
+			else if (!strcmp((char *)node->name, "free"))
+			{
+				if (!strcmp((char *)node->children->content, "yes"))
+					auth->free = TRUE;
+
+				else
+					auth->free = FALSE;
+			}
 		}
 
-		node = xmlNextElementSibling(node);
+		node = node->next;
 	}
 
 	xmlFreeDoc(reader);
-	xmlCleanupParser();
 
 	return auth;
 }
@@ -801,7 +806,11 @@ int download_program_close(RTMP *rtmp)
 	syslog(LOG_INFO, "Stream finished, freeing RTMP structure...");
 	#endif // DEBUG
 
+	RTMP_DeleteStream(rtmp);
+	RTMP_Close(rtmp);
 	RTMP_Free(rtmp);
+
+	rtmp = NULL;
 
 	return 0;
 }
@@ -819,6 +828,22 @@ void iview_cache_index_refresh(IviewCache *cache)
 	index_fetch(cache);
 	categories_fetch(cache);
 	time_fetch(cache);
+}
+
+void iview_cache_free(IviewCache *cache)
+{
+	if (!cache)
+		return;
+
+	xmlCleanupParser();
+
+	iview_cache_config_free(cache->config);
+	iview_cache_auth_free(cache->auth);
+	iview_cache_index_free(cache->index);
+	iview_cache_categories_free(cache->categories);
+
+	free_null(cache->lastRefresh);
+	free_null(cache);	
 }
 
 void iview_cache_config_free(IviewConfig *config)
@@ -990,9 +1015,27 @@ IviewCache *iview_cache_new()
 {
 	IviewCache *cache = malloc(sizeof(IviewCache));
 
-	memset(cache, 0, sizeof(IviewCache));
+	memset(cache, 0, sizeof(*cache));
 
 	return cache;
+}
+
+IviewConfig *iview_config_new()
+{
+	IviewConfig *config = malloc(sizeof(IviewConfig));
+
+	memset(config, 0, sizeof(*config));
+
+	return config;
+}
+
+IviewAuth *iview_auth_new()
+{
+	IviewAuth *auth = malloc(sizeof(IviewAuth));
+
+	memset(auth, 0, sizeof(*auth));
+
+	return auth;
 }
 
 unsigned char *iview_filename_encode(const unsigned char *fileName)

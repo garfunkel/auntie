@@ -137,11 +137,14 @@ int download_program_read(RTMP *rtmp, char *buffer, size_t size, off_t offset);
 int download_program_close(RTMP *rtmp);
 
 IviewCache *iview_cache_new();
+IviewConfig *iview_config_new();
+IviewAuth *iview_auth_new();
 IviewSeries *iview_series_new();
 IviewProgram *iview_program_new();
 IviewKeyword *iview_keyword_new();
 bool iview_cache_index_needs_refresh(const IviewCache *cache);
 void iview_cache_index_refresh(IviewCache *cache);
+void iview_cache_free(IviewCache *cache);
 void iview_cache_config_free(IviewConfig *config);
 void iview_cache_auth_free(IviewAuth *auth);
 void iview_cache_index_free(IviewSeries *series);

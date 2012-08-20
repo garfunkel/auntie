@@ -23,6 +23,9 @@ typedef struct RtmpSession
 	RTMP *rtmp;
 } RtmpSession;
 
+RtmpSession *rtmp_session_new();
+void rtmp_session_free(RtmpSession *session);
+
 void *fuse_iview_init(struct fuse_conn_info *conn);
 int fuse_iview_getattr(const char *path, struct stat *attrStat);
 int fuse_iview_readlink(const char *path, char *buffer, size_t size);

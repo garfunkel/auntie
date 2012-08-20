@@ -32,6 +32,26 @@ struct fuse_operations fuse_iview_operations =
 	.destroy = fuse_iview_destroy,
 };
 
+RtmpSession *rtmp_session_new()
+{
+	RtmpSession *session = malloc(sizeof(RtmpSession));
+
+	pthread_mutex_init(&session->rtmp_read_lock, NULL);
+	
+	session->rtmp = NULL;
+
+	return session;
+}
+
+void rtmp_session_free(RtmpSession *session)
+{
+	pthread_mutex_destroy(&session->rtmp_read_lock);
+
+	session->rtmp = NULL;
+
+	free_null(session);
+}
+
 void *fuse_iview_init(struct fuse_conn_info *conn)
 {
 	IviewCache *cache = iview_cache_new();
@@ -223,9 +243,7 @@ int fuse_iview_open(const char *path, struct fuse_file_info *info)
 
 			if (program)
 			{
-				RtmpSession *rtmpSession = malloc(sizeof(RtmpSession));
-
-				pthread_mutex_init(&rtmpSession->rtmp_read_lock, NULL);
+				RtmpSession *rtmpSession = rtmp_session_new();
 				
 				rtmpSession->rtmp = download_program_open(cache, program);
 						
@@ -240,6 +258,11 @@ int fuse_iview_open(const char *path, struct fuse_file_info *info)
 		else
 			status = -ENOENT;
 	}
+
+	free_null(programName);
+	free_null(seriesName);
+	free_null(decodedProgramName);
+	free_null(decodedSeriesName);
 
 	return status;
 }
@@ -293,7 +316,7 @@ int fuse_iview_release(const char *path, struct fuse_file_info *info)
 
 	download_program_close(session->rtmp);
 
-	pthread_mutex_destroy(&session->rtmp_read_lock);
+	rtmp_session_free(session);
 
 	return 0;
 }
@@ -305,15 +328,7 @@ int fuse_iview_fsync(const char *path, int x, struct fuse_file_info *info)
 
 void fuse_iview_destroy(void *privateData)
 {
-	IviewCache *cache = (IviewCache *)privateData;
-
-	iview_cache_config_free(cache->config);
-	iview_cache_auth_free(cache->auth);
-	iview_cache_index_free(cache->index);
-	iview_cache_categories_free(cache->categories);
-
-	free_null(cache->lastRefresh);
-	free_null(cache);
+	iview_cache_free((IviewCache *)privateData);
 }
 
 char *fuse_get_iview_program_name_from_path(const char *path)
