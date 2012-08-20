@@ -16,19 +16,12 @@ struct fuse_operations fuse_iview_operations =
 {
 	.init = fuse_iview_init,
 	.getattr = fuse_iview_getattr,
-	.readlink = fuse_iview_readlink,
 	.readdir = fuse_iview_readdir,
 	.opendir = fuse_iview_opendir,
-	.unlink = fuse_iview_unlink,
-	.symlink = fuse_iview_symlink,
-	.link = fuse_iview_link,
-	.utime = fuse_iview_utime,
 	.open = fuse_iview_open,
 	.read = fuse_iview_read,
 	.statfs = fuse_iview_statfs,
-	.flush = fuse_iview_flush,
 	.release = fuse_iview_release,
-	.fsync = fuse_iview_fsync,
 	.destroy = fuse_iview_destroy,
 };
 
@@ -135,11 +128,6 @@ int fuse_iview_getattr(const char *path, struct stat *attrStat)
 	free_null(decodedSeriesName);
 
 	return status;
-}
-
-int fuse_iview_readlink(const char *path, char *buffer, size_t size)
-{
-	return 0;
 }
 
 int fuse_iview_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *info)
@@ -267,26 +255,6 @@ int fuse_iview_open(const char *path, struct fuse_file_info *info)
 	return status;
 }
 
-int fuse_iview_unlink(const char *path)
-{
-	return 0;
-}
-
-int fuse_iview_symlink(const char *path, const char *link)
-{
-	return 0;
-}
-
-int fuse_iview_link(const char *path, const char *link)
-{
-	return 0;
-}
-
-int fuse_iview_utime(const char *path, struct utimbuf *buffer)
-{
-	return 0;
-}
-
 int fuse_iview_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *info)
 {
 	RtmpSession *rtmpSession = (RtmpSession *)info->fh;
@@ -305,11 +273,6 @@ int fuse_iview_statfs(const char *path, struct statvfs *stat)
 	return 0;
 }
 
-int fuse_iview_flush(const char *path, struct fuse_file_info *info)
-{
-	return 0;
-}
-
 int fuse_iview_release(const char *path, struct fuse_file_info *info)
 {
 	RtmpSession *session = (RtmpSession *)info->fh;
@@ -318,11 +281,6 @@ int fuse_iview_release(const char *path, struct fuse_file_info *info)
 
 	rtmp_session_free(session);
 
-	return 0;
-}
-
-int fuse_iview_fsync(const char *path, int x, struct fuse_file_info *info)
-{
 	return 0;
 }
 

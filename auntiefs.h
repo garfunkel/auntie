@@ -28,19 +28,12 @@ void rtmp_session_free(RtmpSession *session);
 
 void *fuse_iview_init(struct fuse_conn_info *conn);
 int fuse_iview_getattr(const char *path, struct stat *attrStat);
-int fuse_iview_readlink(const char *path, char *buffer, size_t size);
 int fuse_iview_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *info);
 int fuse_iview_opendir(const char *path, struct fuse_file_info *info);
-int fuse_iview_unlink(const char *path);
-int fuse_iview_symlink(const char *path, const char *link);
-int fuse_iview_link(const char *path, const char *link);
-int fuse_iview_utime(const char *path, struct utimbuf *buffer);
 int fuse_iview_open(const char *path, struct fuse_file_info *info);
 int fuse_iview_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *info);
 int fuse_iview_statfs(const char *path, struct statvfs *stat);
-int fuse_iview_flush(const char *path, struct fuse_file_info *info);
 int fuse_iview_release(const char *path, struct fuse_file_info *info);
-int fuse_iview_fsync(const char *path, int x, struct fuse_file_info *info);
 void fuse_iview_destroy(void *privateData);
 
 char *fuse_get_iview_series_name_from_path(const char *path);
