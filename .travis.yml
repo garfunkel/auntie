@@ -1,5 +1,5 @@
 language: c
 
-install: sudo apt-get install libfuse-dev
+install: sudo apt-get install libfuse-dev libjansson-dev
 
 script: make
